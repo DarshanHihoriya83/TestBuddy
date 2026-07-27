@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "TestBuddy",
+  "version": "0.2.0",
+  "description": "Capture bugs and generate test cases from browser sessions.",
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "host_permissions": [
+    "<all_urls>",
+    "http://localhost:8080/*",
+    "http://127.0.0.1:8080/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "TestBuddy"
+  }
+}

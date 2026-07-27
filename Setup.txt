@@ -1,0 +1,92 @@
+TestBuddy — Setup & Run Commands
+================================
+
+Prerequisites
+-------------
+- Java 21+
+- Node.js 20+
+- PostgreSQL 18 (local)
+  Database : testbuddy
+  Username : admin
+  Password : admin
+  Host     : localhost
+  Port     : 5432
+
+
+1) Create PostgreSQL database (one-time)
+---------------------------------------
+Open psql as postgres (password: admin), then run:
+
+  CREATE ROLE admin LOGIN PASSWORD 'admin';
+  CREATE DATABASE testbuddy OWNER admin;
+
+
+2) Backend (Spring Boot) — port 8080
+------------------------------------
+cd backend
+.\mvnw.cmd spring-boot:run
+
+Health check: http://localhost:8080/api/health
+
+
+3) Frontend (Vite React) — port 5173
+------------------------------------
+cd frontend
+npm install
+npm run dev
+
+Open: http://localhost:5173
+
+
+4) Extension (optional)
+-----------------------
+cd extension
+npm install
+npm run pack
+
+Then either:
+  - Download zip from http://localhost:5173/  (TestBuddy-extension.zip)
+  - Or load unpacked folder: extension\dist
+
+Chrome: chrome://extensions → Developer mode → Load unpacked
+Select the unzipped "TestBuddy" folder (contains manifest.json).
+
+
+5) AI service (optional, hello-world only)
+-----------------------------------------
+cd ai-service
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8001
+
+Health check: http://127.0.0.1:8001/health
+
+
+Demo login
+----------
+Email    : alice@testbuddy.local
+Password : password
+
+Or register a new account at: http://localhost:5173/register
+
+
+Useful URLs
+-----------
+Home / extension download : http://localhost:5173/
+Login                     : http://localhost:5173/login
+Register                  : http://localhost:5173/register
+Bugs dashboard            : http://localhost:5173/bugs
+Projects                  : http://localhost:5173/projects
+Profile                   : http://localhost:5173/profile
+Backend API               : http://localhost:8080/api
+Extension zip (API)       : http://localhost:8080/api/extension/download
+Bug export JSON           : GET /api/bugs/export/json
+Bug import JSON           : POST /api/bugs/import
+
+
+Notes
+-----
+- Start Backend before Frontend / Extension (they call localhost:8080).
+- If PostgreSQL is unavailable, run backend with H2 fallback:
+    .\mvnw.cmd spring-boot:run "-Dspring-boot.run.arguments=--spring.profiles.active=h2"

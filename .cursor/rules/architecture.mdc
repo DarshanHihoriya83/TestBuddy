@@ -1,0 +1,67 @@
+---
+description: TestBuddy stack, architecture, and shared data model conventions
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# TestBuddy — Architecture & Conventions
+
+## Product
+
+Browser extension + platform that records a session and produces either a **bug report** or **test cases**. AI layer *writes* (humanizes steps, expected results, test-case drafts) — it does **not** do visual bug detection.
+
+Full product spec: `PROJECT_SPEC.md`. Build only the current phase; do not skip ahead.
+
+## Stack (fixed)
+
+| Layer | Tech |
+|---|---|
+| Extension | TypeScript + React, Manifest V3, `webextension-polyfill` |
+| Backend | Java 21, Spring Boot 3.x, Spring Data JPA, Spring Security JWT, PostgreSQL |
+| AI service | Python 3.11+, FastAPI, LLM API — **internal only**, never browser-facing |
+| Frontend | React + TypeScript, Vite, TanStack Query, Tailwind CSS |
+| Files | S3-compatible object storage (not Postgres) |
+| Integrations | Jira REST v3, Azure DevOps REST, Apache POI |
+
+## Repo layout
+
+```
+extension/   backend/   ai-service/   frontend/
+```
+
+## Architecture
+
+```
+Extension ──JWT/REST──► Java Backend ──► PostgreSQL
+                            │
+                            ├──► AI service (internal)
+                            ├──► Object storage
+                            └──► Jira / Azure DevOps
+
+Frontend dashboard ──► same Java Backend
+```
+
+## Shared domain shapes
+
+Mirror these as JPA entities (backend) and TypeScript interfaces (frontend + extension):
+
+- `User` — roles: ADMIN | TESTER | DEVELOPER | MANAGER
+- `Project` — optional jiraProjectKey, adoOrgUrl, adoProject
+- `Cycle` — projectId, name, isDefault (dropdown defaults to Cycle 1)
+- `Step` — order, actionType, elementLabel, selector, valueEntered (mask passwords as `••••`), pageUrl, description, expectedResult?
+- `Annotation` / `Attachment` — screenshot/video metadata
+- `Bug` — priority, severity, assignee/reporter/cycle/project, status, steps, attachments, externalRefs
+- `TestCase` — type POSITIVE|NEGATIVE, status AI_DRAFT|VERIFIED|REJECTED|UPLOADED, generatedByAi
+
+## API surface (owned by backend)
+
+Auth, users, projects, cycles, bugs CRUD, testcases CRUD + generate/verify/bulk-upload, exports, Jira/ADO push. AI routes (`/ai/...`) live **only** on the Python service and are called server-to-server.
+
+## Privacy
+
+Never store raw password / sensitive autocomplete values — use `••••` and blur those regions in screenshots by default.
+
+## Phase discipline
+
+Ask before architectural decisions not covered by `PROJECT_SPEC.md`. Do not implement recording, AI generation, or integrations until their phase.

@@ -1,0 +1,26 @@
+{
+  "name": "testbuddy-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "tsc --noEmit && vite build && vite build --config vite.content.config.ts",
+    "pack": "npm run build && python ../scripts/pack-extension.py",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "webextension-polyfill": "^0.12.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/webextension-polyfill": "^0.12.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "typescript": "~5.9.3",
+    "vite": "^8.1.1",
+    "vite-plugin-static-copy": "^3.1.2"
+  }
+}

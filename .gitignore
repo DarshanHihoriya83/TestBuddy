@@ -1,0 +1,15 @@
+.node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+backend/data/
+backend/target/
+extension/.pack-staging/
+.idea/
+.vscode/
+*.iml
+.DS_Store
+*.log
+.env
+.env.*
