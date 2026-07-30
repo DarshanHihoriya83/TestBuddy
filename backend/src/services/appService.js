@@ -123,7 +123,7 @@ async function replaceSteps(client, bugId, steps) {
         step.valueEntered ?? null,
         step.pageUrl ?? "",
         step.description,
-        step.expectedResult ?? null,
+        null, // Bugs store actual steps only; expected_result is for test cases later
         step.screenshotId ?? null,
       ],
     );

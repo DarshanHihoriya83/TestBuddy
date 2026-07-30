@@ -53,11 +53,20 @@ export function BugsPage() {
 
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: fetchUsers });
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: fetchProjects });
-  const projectId = filters.projectId || projectsQuery.data?.[0]?.id;
+  const projectId = filters.projectId || undefined;
   const cyclesQuery = useQuery({
     queryKey: ["cycles", projectId],
     queryFn: () => fetchCycles(projectId!),
     enabled: !!projectId,
+  });
+  const allCyclesQuery = useQuery({
+    queryKey: ["cycles-all", projectsQuery.data?.map((p) => p.id).join(",")],
+    queryFn: async () => {
+      const projects = projectsQuery.data ?? [];
+      const batches = await Promise.all(projects.map((p) => fetchCycles(p.id)));
+      return batches.flat();
+    },
+    enabled: !projectId && !!projectsQuery.data?.length,
   });
   const bugsQuery = useQuery({
     queryKey: ["bugs", filters],
@@ -70,9 +79,10 @@ export function BugsPage() {
   }, [usersQuery.data]);
 
   const cycleName = useMemo(() => {
-    const map = new Map(cyclesQuery.data?.map((c) => [c.id, c.name]));
+    const cycles = projectId ? cyclesQuery.data : allCyclesQuery.data;
+    const map = new Map(cycles?.map((c) => [c.id, c.name]));
     return (id: string) => map.get(id) ?? id.slice(0, 8);
-  }, [cyclesQuery.data]);
+  }, [projectId, cyclesQuery.data, allCyclesQuery.data]);
 
   async function onExport() {
     setBusy(true);
@@ -125,7 +135,7 @@ export function BugsPage() {
             type="button"
             disabled={busy}
             onClick={() => void onExport()}
-            className="rounded-xl border border-[var(--line)] bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-60"
+            className="tb-btn-ghost text-sm disabled:opacity-60"
           >
             Export JSON
           </button>
@@ -133,7 +143,7 @@ export function BugsPage() {
             type="button"
             disabled={busy}
             onClick={() => fileRef.current?.click()}
-            className="rounded-xl bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            className="tb-btn-primary text-sm disabled:opacity-60"
           >
             Import JSON
           </button>
@@ -150,20 +160,14 @@ export function BugsPage() {
         </div>
       </div>
 
-      {error && (
-        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
-      )}
-      {message && (
-        <p className="mb-4 rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-sm text-[var(--accent)]">
-          {message}
-        </p>
-      )}
+      {error && <p className="tb-alert-error mb-4">{error}</p>}
+      {message && <p className="tb-alert-success mb-4">{message}</p>}
 
       <div className="mb-6 grid gap-3 md:grid-cols-3 lg:grid-cols-6">
-        <label className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+        <label className="tb-label">
           Project
           <select
-            className="mt-2 w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
+            className="tb-select"
             value={filters.projectId ?? ""}
             onChange={(e) =>
               setFilters((f) => ({ ...f, projectId: e.target.value, cycleId: "" }))
@@ -195,10 +199,10 @@ export function BugsPage() {
           onChange={(v) => setFilters((f) => ({ ...f, status: v as BugStatus | "" }))}
           options={["", "NEW", "OPEN", "IN_PROGRESS", "FIXED", "VERIFIED", "CLOSED", "REOPENED"]}
         />
-        <label className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+        <label className="tb-label">
           Assignee
           <select
-            className="mt-2 w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
+            className="tb-select"
             value={filters.assigneeId ?? ""}
             onChange={(e) => setFilters((f) => ({ ...f, assigneeId: e.target.value }))}
           >
@@ -210,14 +214,15 @@ export function BugsPage() {
             ))}
           </select>
         </label>
-        <label className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+        <label className="tb-label">
           Cycle
           <select
-            className="mt-2 w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
+            className="tb-select disabled:cursor-not-allowed disabled:opacity-60"
             value={filters.cycleId ?? ""}
+            disabled={!filters.projectId}
             onChange={(e) => setFilters((f) => ({ ...f, cycleId: e.target.value }))}
           >
-            <option value="">All</option>
+            <option value="">{filters.projectId ? "All" : "Select a project first"}</option>
             {cyclesQuery.data?.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -229,14 +234,12 @@ export function BugsPage() {
 
       {bugsQuery.isLoading && <p className="text-sm text-[var(--muted)]">Loading bugs…</p>}
       {bugsQuery.error && (
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-          {(bugsQuery.error as Error).message}
-        </p>
+        <p className="tb-alert-error">{(bugsQuery.error as Error).message}</p>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)]">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-[var(--accent-soft)] text-xs uppercase tracking-wide text-[var(--muted)]">
+      <div className="tb-table-wrap">
+        <table className="tb-table">
+          <thead>
             <tr>
               <th className="px-4 py-3">Title</th>
               <th className="px-4 py-3">Priority</th>
@@ -255,12 +258,9 @@ export function BugsPage() {
               </tr>
             )}
             {bugsQuery.data?.map((bug) => (
-              <tr key={bug.id} className="border-t border-[var(--line)] hover:bg-slate-50/70">
+              <tr key={bug.id}>
                 <td className="px-4 py-3">
-                  <Link
-                    className="font-medium text-[var(--accent)] hover:underline"
-                    to={`/bugs/${bug.id}`}
-                  >
+                  <Link className="tb-link font-medium" to={`/bugs/${bug.id}`}>
                     {bug.title}
                   </Link>
                 </td>
@@ -290,10 +290,10 @@ function FilterSelect({
   options: string[];
 }) {
   return (
-    <label className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+    <label className="tb-label">
       {label}
       <select
-        className="mt-2 w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm"
+        className="tb-select"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >

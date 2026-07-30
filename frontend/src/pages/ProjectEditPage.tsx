@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { fetchProject, updateProject } from "../api";
 import { Shell } from "../components/Shell";
-
+import { validateName, validateOptionalUrl } from "../utils/validation";
 export function ProjectEditPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -47,79 +47,56 @@ export function ProjectEditPage() {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const nameErr = validateName(name);
+    if (nameErr) {
+      setError(nameErr);
+      return;
+    }
+    const urlErr = validateOptionalUrl(adoOrgUrl, "Azure DevOps org URL");
+    if (urlErr) {
+      setError(urlErr);
+      return;
+    }
     saveMutation.mutate();
   }
-
   return (
     <Shell title="Edit project">
-      <Link to={`/projects/${id}`} className="text-sm text-[var(--accent)] hover:underline">
+      <Link to={`/projects/${id}`} className="tb-link text-sm">
         ← Back to project
       </Link>
 
       {projectQuery.isLoading && <p className="mt-4 text-sm text-[var(--muted)]">Loading…</p>}
       {projectQuery.error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-          {(projectQuery.error as Error).message}
-        </p>
+        <p className="tb-alert-error mt-4">{(projectQuery.error as Error).message}</p>
       )}
 
       {projectQuery.data && (
-        <form
-          onSubmit={onSubmit}
-          className="mt-4 max-w-2xl space-y-4 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-6"
-        >
-          <h2 className="text-2xl font-semibold tracking-tight">Edit project</h2>
-          <label className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+        <form onSubmit={onSubmit} className="tb-card tb-card-accent mt-4 max-w-2xl space-y-4 p-6">
+          <h2 className="text-2xl font-bold text-[var(--ink)]">Edit project</h2>
+          <label className="tb-label">
             Name *
-            <input
-              className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              minLength={2}
-            />
+            <input className="tb-input" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
           </label>
-          <label className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+          <label className="tb-label">
             Jira project key
-            <input
-              className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
-              value={jiraProjectKey}
-              onChange={(e) => setJiraProjectKey(e.target.value)}
-            />
+            <input className="tb-input" value={jiraProjectKey} onChange={(e) => setJiraProjectKey(e.target.value)} />
           </label>
-          <label className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+          <label className="tb-label">
             Azure DevOps org URL
-            <input
-              className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
-              value={adoOrgUrl}
-              onChange={(e) => setAdoOrgUrl(e.target.value)}
-            />
+            <input className="tb-input" value={adoOrgUrl} onChange={(e) => setAdoOrgUrl(e.target.value)} />
           </label>
-          <label className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+          <label className="tb-label">
             Azure DevOps project
-            <input
-              className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
-              value={adoProject}
-              onChange={(e) => setAdoProject(e.target.value)}
-            />
+            <input className="tb-input" value={adoProject} onChange={(e) => setAdoProject(e.target.value)} />
           </label>
 
-          {error && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
-          )}
+          {error && <p className="tb-alert-error">{error}</p>}
 
           <div className="flex gap-3">
-            <button
-              type="submit"
-              disabled={saveMutation.isPending || !name.trim()}
-              className="rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-            >
+            <button type="submit" disabled={saveMutation.isPending || !name.trim()} className="tb-btn-primary">
               {saveMutation.isPending ? "Saving…" : "Save changes"}
             </button>
-            <Link
-              to={`/projects/${id}`}
-              className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"
-            >
+            <Link to={`/projects/${id}`} className="tb-btn-ghost">
               Cancel
             </Link>
           </div>

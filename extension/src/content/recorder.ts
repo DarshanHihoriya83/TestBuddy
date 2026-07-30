@@ -1,6 +1,6 @@
 import browser from "webextension-polyfill";
 import type { RecordingSession } from "../recording";
-import { buildExpectedResult, buildStepDescription, formatBoldHtml } from "../stepText";
+import { buildActualStepDescription, formatBoldHtml } from "../stepText";
 import type { Step, StepActionType } from "../types";
 import { openAnnotateEditor } from "./annotateOverlay";
 
@@ -104,7 +104,6 @@ function boot() {
           valueEntered: captured.valueEntered,
           pageUrl: captured.pageUrl,
           description: captured.description,
-          expectedResult: captured.expectedResult,
         },
       })
       .catch((err) => console.warn("TestBuddy ADD_STEP failed", err));
@@ -211,16 +210,12 @@ function boot() {
                     (s) => `
             <div class="rs-event">
               <div class="rs-event-head">
-                <span class="rs-event-order">#${s.order}</span>
+                <span class="rs-event-order">Step ${s.order}</span>
                 <span class="rs-event-type">${s.actionType}</span>
                 ${s.screenshotId ? `<span class="rs-shot-tag">shot</span>` : ""}
+                <span class="rs-actual-tag">Actual step</span>
               </div>
               <div class="rs-event-text">${formatBoldHtml(s.description)}</div>
-              ${
-                s.expectedResult
-                  ? `<div class="rs-expected"><span>Expected:</span> ${formatBoldHtml(s.expectedResult)}</div>`
-                  : ""
-              }
             </div>`,
                   )
                   .join("")
@@ -372,13 +367,7 @@ function captureFromElement(el: Element, eventType: string): CapturedStep | null
 
   const elementLabel = resolveLabel(el, kind);
   const valueEntered = readDisplayValue(el);
-  const description = buildStepDescription({
-    actionType,
-    elementLabel,
-    valueEntered,
-    elementKind: kind,
-  });
-  const expectedResult = buildExpectedResult({
+  const description = buildActualStepDescription({
     actionType,
     elementLabel,
     valueEntered,
@@ -392,7 +381,6 @@ function captureFromElement(el: Element, eventType: string): CapturedStep | null
     valueEntered,
     pageUrl: location.href,
     description,
-    expectedResult,
     elementKind: kind,
   };
 }
@@ -720,14 +708,21 @@ function injectStyles() {
       font-size: 11px; padding: 8px; border-radius: 8px; background: #e6f4ef;
       animation: rs-pop 180ms ease-out;
     }
-    #${ROOT_ID} .rs-event-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+    #${ROOT_ID} .rs-event-head {
+      display: flex; gap: 6px; align-items: center; margin-bottom: 4px; flex-wrap: wrap;
+    }
     #${ROOT_ID} .rs-event-order { font-weight: 700; color: #0f6e56; }
     #${ROOT_ID} .rs-event-type {
       text-transform: uppercase; letter-spacing: 0.04em; color: #5c6b7a; font-size: 10px;
     }
     #${ROOT_ID} .rs-shot-tag {
-      margin-left: auto; font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em;
+      font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em;
       background: #ffe4e6; color: #be123c; padding: 2px 6px; border-radius: 999px; font-weight: 700;
+    }
+    #${ROOT_ID} .rs-actual-tag {
+      margin-left: auto; font-size: 9px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.05em; color: #0f6e56; background: #fff; border: 1px solid #c5ddd3;
+      padding: 2px 6px; border-radius: 999px; white-space: nowrap;
     }
     #${ROOT_ID} .rs-event-text { color: #1a2332; line-height: 1.35; }
     #${ROOT_ID} .rs-event-text strong { font-weight: 700; color: #0b4f3d; }

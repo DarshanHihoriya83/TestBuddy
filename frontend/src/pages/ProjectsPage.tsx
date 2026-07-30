@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useState } from "react";
 import { createProject, deleteProject, fetchProjects } from "../api";
 import { Shell } from "../components/Shell";
-
+import { validateName, validateOptionalUrl } from "../utils/validation";
 export function ProjectsPage() {
   const queryClient = useQueryClient();
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: fetchProjects });
@@ -46,19 +46,26 @@ export function ProjectsPage() {
 
   return (
     <Shell title="Projects">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Projects</h2>
-          <p className="mt-1 text-sm text-[var(--muted)]">
-            Create, view, edit, and delete TestBuddy projects.
-          </p>
-        </div>
-      </div>
+      <p className="mb-6 text-sm text-[var(--muted)]">
+        Create, view, edit, and delete TestBuddy projects.
+      </p>
 
       <form
-        className="mb-8 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-5"
+        className="tb-card tb-card-accent mb-8 p-5"
         onSubmit={(e) => {
           e.preventDefault();
+          const nameErr = validateName(name);
+          if (nameErr) {
+            setError(nameErr);
+            setMessage(null);
+            return;
+          }
+          const urlErr = validateOptionalUrl(adoOrgUrl, "Azure DevOps org URL");
+          if (urlErr) {
+            setError(urlErr);
+            setMessage(null);
+            return;
+          }
           createMutation.mutate({
             name: name.trim(),
             jiraProjectKey: jiraProjectKey.trim() || undefined,
@@ -71,66 +78,65 @@ export function ProjectsPage() {
           Create project
         </h3>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+          <label className="tb-label">
             Name *
             <input
-              className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
+              className="tb-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
               minLength={2}
             />
           </label>
-          <label className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+          <label className="tb-label">
             Jira project key
             <input
-              className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
+              className="tb-input"
               value={jiraProjectKey}
               onChange={(e) => setJiraProjectKey(e.target.value)}
               placeholder="e.g. TB"
             />
           </label>
-          <label className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+          <label className="tb-label">
             Azure DevOps org URL
             <input
-              className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
+              className="tb-input"
               value={adoOrgUrl}
               onChange={(e) => setAdoOrgUrl(e.target.value)}
               placeholder="https://dev.azure.com/org"
             />
           </label>
-          <label className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+          <label className="tb-label">
             Azure DevOps project
             <input
-              className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
+              className="tb-input"
               value={adoProject}
               onChange={(e) => setAdoProject(e.target.value)}
             />
           </label>
         </div>
+        {(error || message) && (
+          <p className={`mt-4 ${error ? "tb-alert-error" : "tb-alert-success"}`}>
+            {error || message}
+          </p>
+        )}
         <button
           type="submit"
           disabled={createMutation.isPending || !name.trim()}
-          className="mt-4 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+          className="tb-btn-primary mt-4"
         >
           {createMutation.isPending ? "Creating…" : "Create project"}
         </button>
       </form>
 
-      {error && (
-        <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
-      )}
-      {message && (
-        <p className="mb-4 rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-sm text-[var(--accent)]">
-          {message}
-        </p>
-      )}
-
       {projectsQuery.isLoading && <p className="text-sm text-[var(--muted)]">Loading projects…</p>}
+      {projectsQuery.error && (
+        <p className="tb-alert-error mb-4">{(projectsQuery.error as Error).message}</p>
+      )}
 
-      <div className="overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)]">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-[var(--accent-soft)] text-xs uppercase tracking-wide text-[var(--muted)]">
+      <div className="tb-table-wrap">
+        <table className="tb-table">
+          <thead>
             <tr>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Jira key</th>
@@ -147,12 +153,9 @@ export function ProjectsPage() {
               </tr>
             )}
             {projectsQuery.data?.map((project) => (
-              <tr key={project.id} className="border-t border-[var(--line)]">
+              <tr key={project.id}>
                 <td className="px-4 py-3 font-medium">
-                  <Link
-                    className="text-[var(--accent)] hover:underline"
-                    to={`/projects/${project.id}`}
-                  >
+                  <Link className="tb-link" to={`/projects/${project.id}`}>
                     {project.name}
                   </Link>
                 </td>
@@ -160,21 +163,18 @@ export function ProjectsPage() {
                 <td className="px-4 py-3">{project.adoProject || "—"}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-2">
-                    <Link
-                      to={`/projects/${project.id}`}
-                      className="rounded-lg border border-[var(--line)] px-2.5 py-1 text-xs hover:bg-slate-50"
-                    >
+                    <Link to={`/projects/${project.id}`} className="tb-btn-ghost px-2.5 py-1 text-xs">
                       View
                     </Link>
                     <Link
                       to={`/projects/${project.id}/edit`}
-                      className="rounded-lg border border-[var(--line)] px-2.5 py-1 text-xs hover:bg-slate-50"
+                      className="tb-btn-ghost px-2.5 py-1 text-xs"
                     >
                       Edit
                     </Link>
                     <button
                       type="button"
-                      className="rounded-lg border border-red-200 px-2.5 py-1 text-xs text-red-700 hover:bg-red-50"
+                      className="rounded-lg border border-red-900/50 px-2.5 py-1 text-xs text-[var(--danger)] hover:bg-[var(--danger-soft)]"
                       disabled={deleteMutation.isPending}
                       onClick={() => {
                         if (

@@ -20,29 +20,24 @@ export function ProjectDetailPage() {
 
   return (
     <Shell title="Project detail">
-      <Link to="/projects" className="text-sm text-[var(--accent)] hover:underline">
+      <Link to="/projects" className="tb-link text-sm">
         ← Back to projects
       </Link>
 
       {projectQuery.isLoading && <p className="mt-4 text-sm text-[var(--muted)]">Loading…</p>}
       {projectQuery.error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-          {(projectQuery.error as Error).message}
-        </p>
+        <p className="tb-alert-error mt-4">{(projectQuery.error as Error).message}</p>
       )}
 
       {project && (
         <article className="mt-4 space-y-6">
-          <header className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-6">
+          <header className="tb-card tb-card-accent p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h2 className="text-3xl font-semibold tracking-tight">{project.name}</h2>
+                <h2 className="text-3xl font-bold tracking-tight text-[var(--ink)]">{project.name}</h2>
                 <p className="mt-2 text-sm text-[var(--muted)]">ID: {project.id}</p>
               </div>
-              <Link
-                to={`/projects/${project.id}/edit`}
-                className="rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white"
-              >
+              <Link to={`/projects/${project.id}/edit`} className="tb-btn-primary text-sm">
                 Edit project
               </Link>
             </div>
@@ -68,8 +63,8 @@ export function ProjectDetailPage() {
             </dl>
           </header>
 
-          <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-6">
-            <h3 className="text-lg font-semibold">Cycles</h3>
+          <section className="tb-card p-6">
+            <h3 className="text-lg font-bold text-[var(--ink)]">Cycles</h3>
             {cyclesQuery.isLoading && (
               <p className="mt-3 text-sm text-[var(--muted)]">Loading cycles…</p>
             )}
@@ -77,7 +72,7 @@ export function ProjectDetailPage() {
               {cyclesQuery.data?.map((cycle) => (
                 <li
                   key={cycle.id}
-                  className="flex items-center justify-between rounded-xl border border-[var(--line)] px-4 py-3 text-sm"
+                  className="flex items-center justify-between rounded-xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3 text-sm"
                 >
                   <span className="font-medium">{cycle.name}</span>
                   {cycle.isDefault && (

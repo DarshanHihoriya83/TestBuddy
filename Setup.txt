@@ -89,3 +89,29 @@ Notes
 -----
 - Start Backend before Frontend / Extension (they call localhost:8080).
 - Copy backend/.env.example to backend/.env if needed (defaults match local Postgres).
+
+
+Recent updates (30 Jul 2026)
+----------------------------
+
+Backend — Node.js / Express
+  - Java/Spring Boot backend removed; use backend/ (Express + PostgreSQL + JWT).
+  - Default DB: postgresql://admin:admin@localhost:5432/testbuddy
+  - Seeded users password: password (see README for full list).
+
+Extension — v0.3.0 recording improvements
+  - On-page toolbar: Record / Pause / Stop / Screenshot (top frame only — no duplicate bar in iframes).
+  - Screenshot flow: capture tab → draw red highlight → saves as a step.
+  - Bug overview text can generate a step from your description.
+  - Pack: cd extension && npm run pack
+    → TestBuddy-extension.zip in frontend/public and backend/public/downloads
+
+Frontend — light UI
+  - Dashboard uses a light theme (white cards, slate text, teal accent).
+  - Pages: / (home), /login, /register, /bugs, /projects, /profile
+  - After UI changes: cd frontend && npm run build (or npm run dev for local work)
+
+Regression checks (optional, from repo root)
+  node scripts/regression.mjs
+  node scripts/smoke-recording-api.mjs
+  (Requires backend running on port 8080.)

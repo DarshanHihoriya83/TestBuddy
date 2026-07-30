@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchMe, updateProfile } from "../api";
 import { useAuth } from "../auth";
 import { Shell } from "../components/Shell";
-
+import { validateName, validatePasswordChange } from "../utils/validation";
 export function ProfilePage() {
   const { user, updateUser, token } = useAuth();
   const meQuery = useQuery({
@@ -35,14 +35,13 @@ export function ProfilePage() {
     setError(null);
     setMessage(null);
     try {
-      if (newPassword || confirmPassword || currentPassword) {
-        if (!currentPassword) throw new Error("Enter your current password to change it");
-        if (newPassword.length < 8) throw new Error("New password must be at least 8 characters");
-        if (newPassword !== confirmPassword) throw new Error("New passwords do not match");
-      }
+      const nameErr = validateName(name);
+      if (nameErr) throw new Error(nameErr);
 
-      const updated = await updateProfile({
-        name: name.trim(),
+      const passwordErr = validatePasswordChange(currentPassword, newPassword, confirmPassword);
+      if (passwordErr) throw new Error(passwordErr);
+
+      const updated = await updateProfile({        name: name.trim(),
         ...(newPassword
           ? { currentPassword, newPassword }
           : {}),
@@ -73,16 +72,13 @@ export function ProfilePage() {
       <div className="mx-auto max-w-2xl">
         <header className="mb-6 flex items-center gap-4">
           <div
-            className="grid h-16 w-16 place-items-center rounded-2xl text-xl font-semibold text-white"
-            style={{
-              background: "linear-gradient(145deg, #0f6e56, #1a5f7a)",
-            }}
+            className="grid h-16 w-16 place-items-center rounded-2xl bg-[var(--accent)] text-xl font-semibold text-white"
             aria-hidden
           >
             {initials}
           </div>
           <div>
-            <h2 className="text-2xl font-semibold tracking-tight">{profile?.name ?? "…"}</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-[var(--ink)]">{profile?.name ?? "…"}</h2>
             <p className="text-sm text-[var(--muted)]">{profile?.email}</p>
           </div>
         </header>
@@ -91,78 +87,57 @@ export function ProfilePage() {
           <p className="mb-4 text-sm text-[var(--muted)]">Loading profile…</p>
         )}
         {meQuery.error && (
-          <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-            {(meQuery.error as Error).message}
-          </p>
+          <p className="tb-alert-error mb-4">{(meQuery.error as Error).message}</p>
         )}
 
-        <form
-          onSubmit={onSave}
-          className="space-y-5 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-6"
-        >
-          <label className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+        <form onSubmit={onSave} className="tb-card tb-card-accent space-y-5 p-6">
+          <label className="tb-label">
             Display name
-            <input
-              className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              minLength={2}
-            />
+            <input className="tb-input" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
           </label>
 
-          <label className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+          <label className="tb-label">
             Email
-            <input
-              className="mt-2 w-full rounded-lg border border-[var(--line)] bg-slate-50 px-3 py-2 text-sm text-[var(--muted)]"
-              value={profile?.email ?? ""}
-              disabled
-              readOnly
-            />
+            <input className="tb-input bg-[var(--bg0)] text-[var(--muted)]" value={profile?.email ?? ""} disabled readOnly />
           </label>
 
-          <label className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+          <label className="tb-label">
             Role
-            <input
-              className="mt-2 w-full rounded-lg border border-[var(--line)] bg-slate-50 px-3 py-2 text-sm text-[var(--muted)]"
-              value={profile?.role ?? ""}
-              disabled
-              readOnly
-            />
+            <input className="tb-input bg-[var(--bg0)] text-[var(--muted)]" value={profile?.role ?? ""} disabled readOnly />
           </label>
 
           <div className="border-t border-[var(--line)] pt-5">
-            <h3 className="text-sm font-semibold">Change password</h3>
+            <h3 className="text-sm font-bold text-[var(--ink)]">Change password</h3>
             <p className="mt-1 text-xs text-[var(--muted)]">
               Leave blank to keep your current password.
             </p>
             <div className="mt-4 space-y-4">
-              <label className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+              <label className="tb-label">
                 Current password
                 <input
                   type="password"
-                  className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
+                  className="tb-input"
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
                   autoComplete="current-password"
                 />
               </label>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+              <label className="tb-label">
                 New password
                 <input
                   type="password"
-                  className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
+                  className="tb-input"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   autoComplete="new-password"
                   minLength={8}
                 />
               </label>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+              <label className="tb-label">
                 Confirm new password
                 <input
                   type="password"
-                  className="mt-2 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm"
+                  className="tb-input"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   autoComplete="new-password"
@@ -172,20 +147,10 @@ export function ProfilePage() {
             </div>
           </div>
 
-          {error && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
-          )}
-          {message && (
-            <p className="rounded-lg bg-[var(--accent-soft)] px-3 py-2 text-sm text-[var(--accent)]">
-              {message}
-            </p>
-          )}
+          {error && <p className="tb-alert-error">{error}</p>}
+          {message && <p className="tb-alert-success">{message}</p>}
 
-          <button
-            type="submit"
-            disabled={busy || !name.trim()}
-            className="rounded-xl bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-          >
+          <button type="submit" disabled={busy || !name.trim()} className="tb-btn-primary">
             {busy ? "Saving…" : "Save profile"}
           </button>
         </form>

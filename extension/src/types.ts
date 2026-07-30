@@ -48,7 +48,9 @@ export interface Step {
   selector: string;
   valueEntered?: string;
   pageUrl: string;
+  /** What actually happened (bug repro). Past-tense action text. */
   description: string;
+  /** Test-case only — do not set on bug steps. */
   expectedResult?: string;
   screenshotId?: string;
 }

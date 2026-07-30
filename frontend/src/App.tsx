@@ -10,6 +10,7 @@ import { ProjectEditPage } from "./pages/ProjectEditPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
+import { NavDrawer, NavProvider } from "./components/AppNavigation";
 import type { ReactNode } from "react";
 
 const queryClient = new QueryClient();
@@ -25,7 +26,9 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <BrowserRouter>
-          <Routes>
+          <NavProvider>
+            <NavDrawer />
+            <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
@@ -78,7 +81,8 @@ export default function App() {
               }
             />
             <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+            </Routes>
+          </NavProvider>
         </BrowserRouter>
       </AuthProvider>
     </QueryClientProvider>

@@ -1,5 +1,5 @@
 import type { Step } from "../types";
-import { boldData, buildExpectedResult } from "../stepText";
+import { boldData } from "../stepText";
 
 export interface RectAnnotation {
   type: "rect";
@@ -18,7 +18,7 @@ export interface CapturedScreenshot {
   annotations: RectAnnotation[];
 }
 
-/** Turn a short bug overview into a clear repro observation step. */
+/** Turn a short bug overview into an actual observation step (not expected result). */
 export function buildObservationFromOverview(args: {
   overview: string;
   pageUrl: string;
@@ -34,15 +34,8 @@ export function buildObservationFromOverview(args: {
     pageUrl: args.pageUrl,
     screenshotId: args.screenshotId,
     description: overview
-      ? `Inspected the highlighted region and observed the defect: ${boldData(overview)}`
-      : `Inspected the highlighted region and marked a defect on the screenshot`,
-    expectedResult: overview
-      ? `The highlighted area should behave correctly — issue ${boldData(overview)} should not occur`
-      : buildExpectedResult({
-          actionType: "click",
-          elementLabel: "highlighted defect",
-          elementKind: "clickable",
-        }),
+      ? `Observed the defect on the highlighted area: ${boldData(overview)}`
+      : `Marked a defect on the highlighted screenshot region`,
   };
 }
 

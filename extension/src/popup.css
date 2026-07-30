@@ -150,6 +150,67 @@ button.linkish {
   align-self: flex-start;
 }
 
+.field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.field-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.regen-btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.regen-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.regen-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.polish-both {
+  border: 1px dashed var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.polish-both:hover:not(:disabled) {
+  background: #d9eee6;
+}
+
+.polish-both:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.status.polish-ok {
+  background: #ecfdf5;
+  color: #047857;
+}
+
 .status {
   font-size: 0.8rem;
   padding: 8px 10px;
@@ -289,6 +350,20 @@ button.linkish {
   letter-spacing: 0.04em;
   color: var(--muted);
   font-size: 0.65rem;
+}
+
+.live-actual-tag {
+  margin-left: auto;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 6px;
+  white-space: nowrap;
 }
 
 .live-desc {

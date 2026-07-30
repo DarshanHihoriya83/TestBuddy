@@ -17,7 +17,11 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-export function buildStepDescription(args: {
+/**
+ * Bug reproduction steps describe what actually happened (past tense).
+ * Do NOT put expected-result language here — that belongs to test cases.
+ */
+export function buildActualStepDescription(args: {
   actionType: StepActionType;
   elementLabel: string;
   valueEntered?: string;
@@ -29,33 +33,47 @@ export function buildStepDescription(args: {
 
   switch (args.actionType) {
     case "click":
-      if (kind === "link") return `Clicked the hyperlink '${label}'`;
-      if (kind === "button") return `Clicked the '${label}' button`;
-      return `Clicked the '${label}'`;
+      if (kind === "link") return `Clicked the hyperlink ${boldData(label)}`;
+      if (kind === "button") return `Clicked the ${boldData(label)} button`;
+      return `Clicked ${boldData(label)}`;
     case "input":
-      if (value) return `Entered ${boldData(value)} into the '${label}' field`;
-      return `Typed into the '${label}' field`;
+      if (value) return `Entered ${boldData(value)} in the ${boldData(label)} field`;
+      return `Typed in the ${boldData(label)} field`;
     case "select":
-      if (value) return `Selected ${boldData(value)} from the '${label}' dropdown`;
-      return `Changed the '${label}' dropdown`;
+      if (value) return `Selected ${boldData(value)} from the ${boldData(label)} dropdown`;
+      return `Changed the ${boldData(label)} dropdown`;
     case "check":
       if (kind === "radio") {
         return value
-          ? `Selected radio option ${boldData(value)} for '${label}'`
-          : `Selected a radio option for '${label}'`;
+          ? `Selected radio option ${boldData(value)} for ${boldData(label)}`
+          : `Selected a radio option for ${boldData(label)}`;
       }
-      if (value === "checked") return `Checked the '${label}' checkbox`;
-      if (value === "unchecked") return `Unchecked the '${label}' checkbox`;
-      return `Toggled the '${label}' checkbox`;
+      if (value === "checked") return `Checked the ${boldData(label)} checkbox`;
+      if (value === "unchecked") return `Unchecked the ${boldData(label)} checkbox`;
+      return `Toggled the ${boldData(label)} checkbox`;
     case "submit":
-      return `Submitted the '${label}' form`;
+      return `Submitted the ${boldData(label)} form`;
     case "navigate":
-      return `Navigated to ${label}`;
+      return `Navigated to ${boldData(label)}`;
     default:
-      return `Interacted with '${label}'`;
+      return `Interacted with ${boldData(label)}`;
   }
 }
 
+/** @deprecated Use buildActualStepDescription for bug steps. Kept for test-case mode later. */
+export function buildStepDescription(args: {
+  actionType: StepActionType;
+  elementLabel: string;
+  valueEntered?: string;
+  elementKind?: string;
+}): string {
+  return buildActualStepDescription(args);
+}
+
+/**
+ * Expected results are for test cases only — never attach to bug reproduction steps.
+ * Kept for Phase 4 Test Case mode.
+ */
 export function buildExpectedResult(args: {
   actionType: StepActionType;
   elementLabel: string;

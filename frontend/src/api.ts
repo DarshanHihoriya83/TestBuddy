@@ -17,7 +17,14 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `${res.status} ${res.statusText}`);
+    let message = text || `${res.status} ${res.statusText}`;
+    try {
+      const body = JSON.parse(text) as { message?: string };
+      if (body.message) message = body.message;
+    } catch {
+      /* keep raw text */
+    }
+    throw new Error(message);
   }
   if (res.status === 204) return undefined as T;
   const text = await res.text();

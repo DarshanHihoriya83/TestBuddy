@@ -17,6 +17,7 @@ function downloadJson(filename: string, data: unknown) {
 export function BugDetailPage() {
   const { id = "" } = useParams();
   const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const [exportError, setExportError] = useState(false);
   const bugQuery = useQuery({ queryKey: ["bug", id], queryFn: () => fetchBug(id), enabled: !!id });
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: fetchUsers });
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: fetchProjects });
@@ -34,47 +35,47 @@ export function BugDetailPage() {
 
   async function onExport() {
     setExportMsg(null);
+    setExportError(false);
     try {
       const data = await exportBugJson(id);
       downloadJson(`testbuddy-bug-${id}.json`, data);
       setExportMsg("Exported JSON downloaded");
     } catch (err) {
+      setExportError(true);
       setExportMsg(err instanceof Error ? err.message : "Export failed");
     }
   }
 
+  const pageTitle = bug?.title ? (bug.title.length > 40 ? `${bug.title.slice(0, 40)}…` : bug.title) : "Bug detail";
+
   return (
-    <Shell title="Bug detail">
-      <Link to="/bugs" className="text-sm text-[var(--accent)] hover:underline">
+    <Shell title={pageTitle}>
+      <Link to="/bugs" className="tb-link text-sm">
         ← Back to bugs
       </Link>
 
       {bugQuery.isLoading && <p className="mt-4 text-sm text-[var(--muted)]">Loading…</p>}
       {bugQuery.error && (
-        <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-          {(bugQuery.error as Error).message}
-        </p>
+        <p className="tb-alert-error mt-4">{(bugQuery.error as Error).message}</p>
       )}
 
       {bug && (
         <article className="mt-4 space-y-6">
-          <header className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-6">
+          <header className="tb-card tb-card-accent p-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--accent)]">
+              <span className="tb-badge">
                 {bug.status} · {bug.priority} · {bug.severity}
-              </p>
-              <button
-                type="button"
-                onClick={() => void onExport()}
-                className="rounded-lg border border-[var(--line)] px-3 py-1.5 text-xs font-semibold hover:bg-slate-50"
-              >
+              </span>
+              <button type="button" onClick={() => void onExport()} className="tb-btn-ghost text-xs">
                 Export JSON
               </button>
             </div>
             {exportMsg && (
-              <p className="mt-2 text-xs text-[var(--muted)]">{exportMsg}</p>
+              <p className={`mt-2 text-xs ${exportError ? "tb-alert-error" : "text-[var(--success)]"}`}>
+                {exportMsg}
+              </p>
             )}
-            <h2 className="mt-2 text-3xl font-semibold tracking-tight">{bug.title}</h2>
+            <h2 className="mt-2 text-3xl font-bold tracking-tight text-[var(--ink)]">{bug.title}</h2>
             <p className="mt-3 whitespace-pre-wrap text-[var(--muted)]">{bug.description}</p>
             <dl className="mt-5 grid gap-3 text-sm md:grid-cols-4">
               <div>
@@ -96,8 +97,8 @@ export function BugDetailPage() {
             </dl>
           </header>
 
-          <section className="rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-6">
-            <h3 className="text-lg font-semibold">Steps</h3>
+          <section className="tb-card p-6">
+            <h3 className="text-lg font-bold text-[var(--ink)]">Actual steps</h3>
             {bug.steps.length === 0 ? (
               <p className="mt-3 text-sm text-[var(--muted)]">No steps recorded yet.</p>
             ) : (
@@ -105,19 +106,19 @@ export function BugDetailPage() {
                 {bug.steps.map((step) => (
                   <li
                     key={`${step.order}-${step.description}`}
-                    className="rounded-xl border border-[var(--line)] px-4 py-3"
+                    className="rounded-xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3"
                   >
-                    <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-[var(--muted)]">
-                      <span>Step {step.order}</span>
-                      <span>·</span>
-                      <span>{step.actionType}</span>
+                    <div className="flex items-center justify-between gap-2 text-xs uppercase tracking-wide text-[var(--muted)]">
+                      <span>
+                        Step {step.order}
+                        <span className="mx-1.5">·</span>
+                        {step.actionType}
+                      </span>
+                      <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-bold tracking-wide text-[var(--accent-hover)]">
+                        Actual step
+                      </span>
                     </div>
                     <p className="mt-1 font-medium">{step.description}</p>
-                    {step.expectedResult && (
-                      <p className="mt-1 text-sm text-[var(--muted)]">
-                        Expected: {step.expectedResult}
-                      </p>
-                    )}
                   </li>
                 ))}
               </ol>

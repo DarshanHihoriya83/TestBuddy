@@ -18,8 +18,41 @@ Architecture conventions live in [`.cursor/rules/architecture.mdc`](./.cursor/ru
 
 - Manual + recorded Bug mode end-to-end (extension → API → dashboard)
 - Recording: on-page toolbar with live event count, pause/resume/stop
+- Screenshot capture with drag-to-highlight rectangle on the page
+- Bug overview text can auto-generate a recorded step
 - User registration + login (JWT), user profile page
+- Light-themed React dashboard (teal accent, no third-party branding)
 - PostgreSQL database `testbuddy`
+- Node.js Express backend (replaced earlier Java/Spring Boot prototype)
+
+## Recent updates (30 Jul 2026)
+
+### Backend — Node.js rewrite
+- Replaced Java/Spring Boot with **Express + `pg` + JWT + bcrypt** under `backend/`
+- Same REST API surface (~20 endpoints): auth, projects, cycles, bugs CRUD, extension download
+- Seed data on first start; config via `backend/.env` (see `.env.example`)
+
+### Extension — recording fixes (v0.3.0)
+- Fixed duplicate on-page toolbar (UI only in top frame; iframes still capture events)
+- Broader click/input capture (custom buttons, ARIA roles, `tabindex`, etc.)
+- Serialized step writes so rapid actions are not dropped
+- **Screenshot** button → visible-tab capture → red highlight overlay → step saved
+- **Bug overview** field can build a step from your description
+- `npm run pack` outputs zip to `frontend/public/` and `backend/public/downloads/`
+
+### Frontend — UI refresh
+- Switched from dark/red theme to a **clean light dashboard** (slate + teal `#0d9488`)
+- Removed all third-party YouTube/branding references
+- Updated home, auth (login/register), sidebar shell, bugs/projects/profile pages
+- Shared utility classes in `frontend/src/index.css` (`.tb-card`, `.tb-btn-primary`, etc.)
+
+### Regression / smoke scripts
+From repo root (backend must be running on `:8080`):
+
+```bash
+node scripts/regression.mjs          # API + extension artifact checks
+node scripts/smoke-recording-api.mjs # quick recording-related API smoke test
+```
 
 ## Quick start
 

@@ -17,6 +17,7 @@ import {
   type RecordingSession,
 } from "./recording";
 import { composeBugDescription } from "./content/bugCapture";
+import { polishBugCopy, polishBugDescription, polishBugTitle } from "./bugPolish";
 import { renderBoldText } from "./renderBold";
 import type { BugPriority, BugSeverity, Cycle, Project, User } from "./types";
 
@@ -25,8 +26,8 @@ type Mode = "BUG" | "TEST_CASE";
 export function PopupApp() {
   const [token, setToken] = useState<string | null>(null);
   const [apiBase, setApiBase] = useState("http://localhost:8080");
-  const [email, setEmail] = useState("alice@testbuddy.local");
-  const [password, setPassword] = useState("password");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [mode, setMode] = useState<Mode>("BUG");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -42,6 +43,7 @@ export function PopupApp() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState<RecordingSession>(EMPTY_SESSION);
+  const [polishMsg, setPolishMsg] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -121,6 +123,44 @@ export function PopupApp() {
       !busy,
     [recording, busy],
   );
+
+  function onRegenerateTitle() {
+    const source = title.trim() || description.trim();
+    if (!source) {
+      setError("Type a rough title or description first, then Regenerate");
+      return;
+    }
+    setError(null);
+    const next = polishBugTitle(title, description);
+    setTitle(next);
+    setPolishMsg("Title polished (Normalize → Understand → Title → QA)");
+  }
+
+  function onRegenerateDescription() {
+    const source = description.trim() || title.trim();
+    if (!source) {
+      setError("Type a rough description or title first, then Regenerate");
+      return;
+    }
+    setError(null);
+    const nextTitle = title.trim() ? polishBugTitle(title, description) : polishBugTitle(description);
+    if (!title.trim()) setTitle(nextTitle);
+    setDescription(polishBugDescription(description, title, nextTitle));
+    setPolishMsg("Description polished (Summary / Observed / Expected)");
+  }
+
+  function onPolishBoth() {
+    const source = title.trim() || description.trim();
+    if (!source) {
+      setError("Enter a rough title or description first");
+      return;
+    }
+    setError(null);
+    const polished = polishBugCopy(title, description);
+    setTitle(polished.title);
+    setDescription(polished.description);
+    setPolishMsg("Both polished with multi-step QA generator");
+  }
 
   async function onLogin(e: FormEvent) {
     e.preventDefault();
@@ -220,7 +260,16 @@ export function PopupApp() {
           recording.screenshots || [],
         ),
         status: "NEW",
-        steps: recording.steps,
+        steps: recording.steps.map((step) => ({
+          order: step.order,
+          actionType: step.actionType,
+          elementLabel: step.elementLabel,
+          selector: step.selector,
+          valueEntered: step.valueEntered,
+          pageUrl: step.pageUrl,
+          description: step.description,
+          screenshotId: step.screenshotId,
+        })),
       });
       await browser.runtime.sendMessage({ type: "CLEAR_RECORDING" });
       setRecording(EMPTY_SESSION);
@@ -311,15 +360,11 @@ export function PopupApp() {
               ).map((step) => (
                 <div className="live-event" key={`${step.order}-${step.description}`}>
                   <div className="live-event-head">
-                    <span className="live-order">#{step.order}</span>
+                    <span className="live-order">Step {step.order}</span>
                     <span className="live-type">{step.actionType}</span>
+                    <span className="live-actual-tag">Actual step</span>
                   </div>
                   <div className="live-desc">{renderBoldText(step.description)}</div>
-                  {step.expectedResult && (
-                    <div className="live-expected">
-                      <span>Expected:</span> {renderBoldText(step.expectedResult)}
-                    </div>
-                  )}
                 </div>
               ))
             )}
@@ -377,18 +422,64 @@ export function PopupApp() {
         </div>
       ) : recording.status === "idle" ? (
         <form className="panel" onSubmit={onStartRecording}>
-          <label>
-            Title
-            <input value={title} onChange={(e) => setTitle(e.target.value)} required />
-          </label>
-          <label>
-            Description
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              required
-            />
-          </label>
+          <div className="field-head">
+            <label className="field-label" htmlFor="bug-title">
+              Title
+            </label>
+            <button
+              type="button"
+              className="regen-btn"
+              onClick={onRegenerateTitle}
+              disabled={!title.trim() && !description.trim()}
+            >
+              {title.trim() ? "Regenerate" : "Generate"}
+            </button>
+          </div>
+          <input
+            id="bug-title"
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              setPolishMsg(null);
+            }}
+            placeholder="e.g. mobile number not digit"
+            required
+          />
+
+          <div className="field-head">
+            <label className="field-label" htmlFor="bug-desc">
+              Description
+            </label>
+            <button
+              type="button"
+              className="regen-btn"
+              onClick={onRegenerateDescription}
+              disabled={!title.trim() && !description.trim()}
+            >
+              {description.trim() ? "Regenerate" : "Generate"}
+            </button>
+          </div>
+          <textarea
+            id="bug-desc"
+            value={description}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              setPolishMsg(null);
+            }}
+            placeholder="Rough notes about the bug…"
+            required
+          />
+
+          <button
+            type="button"
+            className="polish-both"
+            onClick={onPolishBoth}
+            disabled={!title.trim() && !description.trim()}
+          >
+            Polish title &amp; description
+          </button>
+          {polishMsg && <div className="status polish-ok">{polishMsg}</div>}
+
           <div className="row">
             <label>
               Priority
@@ -455,9 +546,8 @@ export function PopupApp() {
           {error && <div className="status error">{error}</div>}
           {message && <div className="status">{message}</div>}
           <p className="hint">
-            Records buttons, inputs, placeholders, checkboxes, radios, dropdowns, links, and
-            typed text. Entered values appear in bold; each step gets an expected result
-            automatically.
+            Tip: rough notes OK — e.g. &quot;mobile numbe not Digit&quot; → polished title &amp;
+            structured description via <strong>Polish</strong> / <strong>Regenerate</strong>.
           </p>
         </form>
       ) : (

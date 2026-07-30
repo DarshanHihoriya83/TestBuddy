@@ -8,7 +8,7 @@ import {
   type RecordingSession,
 } from "./recording";
 import type { Step } from "./types";
-import { buildExpectedResult, buildStepDescription } from "./stepText";
+import { buildActualStepDescription } from "./stepText";
 import { buildObservationFromOverview } from "./content/bugCapture";
 
 let writeChain: Promise<unknown> = Promise.resolve();
@@ -114,7 +114,9 @@ async function addStep(partial: Omit<Step, "order">) {
     if (session.status !== "recording" && session.status !== "paused") {
       return session;
     }
-    const step: Step = { ...partial, order: session.steps.length + 1 };
+    // Bug mode: store actual steps only — never expected-result text.
+    const { expectedResult: _ignored, ...actual } = partial;
+    const step: Step = { ...actual, order: session.steps.length + 1 };
     return { ...session, steps: [...session.steps, step] };
   });
 }
@@ -131,11 +133,7 @@ async function addNavigateStep(url: string) {
       elementLabel,
       selector: "",
       pageUrl: url,
-      description: buildStepDescription({
-        actionType: "navigate",
-        elementLabel,
-      }),
-      expectedResult: buildExpectedResult({
+      description: buildActualStepDescription({
         actionType: "navigate",
         elementLabel,
       }),
