@@ -16,6 +16,7 @@ import {
   RECORDING_STORAGE_KEY,
   type RecordingSession,
 } from "./recording";
+import { composeBugDescription } from "./content/bugCapture";
 import { renderBoldText } from "./renderBold";
 import type { BugPriority, BugSeverity, Cycle, Project, User } from "./types";
 
@@ -153,7 +154,7 @@ export function PopupApp() {
     try {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (!tab?.id) throw new Error("No active tab to record");
-      if (tab.url?.startsWith("chrome://") || tab.url?.startsWith("edge://")) {
+      if (tab.url?.startsWith("chrome://") || tab.url?.startsWith("edge://") || tab.url?.startsWith("about:")) {
         throw new Error("Open a normal webpage first — cannot record browser internal pages");
       }
 
@@ -171,7 +172,12 @@ export function PopupApp() {
         },
       })) as { ok: boolean; session?: RecordingSession; error?: string };
 
-      if (!res.ok || !res.session) throw new Error(res.error || "Failed to start recording");
+      if (!res?.ok || !res.session) {
+        throw new Error(res?.error || "Failed to start recording");
+      }
+      if (res.session.status !== "recording") {
+        throw new Error(res.error || "Recorder did not start — reload the page and try again");
+      }
       setRecording(res.session);
       setMessage("Recording started — use the on-page toolbar. Events update live.");
       window.close();
@@ -209,6 +215,10 @@ export function PopupApp() {
     try {
       const bug = await createBug({
         ...recording.meta,
+        description: composeBugDescription(
+          recording.meta.description,
+          recording.screenshots || [],
+        ),
         status: "NEW",
         steps: recording.steps,
       });
@@ -285,6 +295,12 @@ export function PopupApp() {
               <span className="live-count-label">events</span>
             </div>
           </div>
+          {(recording.screenshots?.length || 0) > 0 && (
+            <div className="live-shots">
+              {recording.screenshots.length} highlighted screenshot
+              {recording.screenshots.length === 1 ? "" : "s"}
+            </div>
+          )}
           <div className="live-feed" aria-live="polite">
             {recording.steps.length === 0 ? (
               <div className="live-empty">No steps yet — interact with the page.</div>

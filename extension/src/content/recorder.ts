@@ -2,9 +2,11 @@ import browser from "webextension-polyfill";
 import type { RecordingSession } from "../recording";
 import { buildExpectedResult, buildStepDescription, formatBoldHtml } from "../stepText";
 import type { Step, StepActionType } from "../types";
+import { openAnnotateEditor } from "./annotateOverlay";
 
 const ROOT_ID = "testbuddy-recorder-root";
 const STYLE_ID = "testbuddy-recorder-style";
+const IS_TOP_FRAME = window === window.top;
 
 declare global {
   interface Window {
@@ -24,12 +26,28 @@ function boot() {
   let listenersBound = false;
   let lastFingerprint = "";
   let lastAt = 0;
+  let annotating = false;
+  let statusBeforeAnnotate: RecordingSession["status"] | null = null;
 
   const onDomEvent = (event: Event) => {
+    if (annotating) return;
     if (!session || session.status !== "recording") return;
     let target = event.target;
     if (!(target instanceof Element)) return;
     if (target.closest(`#${ROOT_ID}`)) return;
+
+    // Form submit: record the form itself
+    if (event.type === "submit") {
+      const form =
+        target instanceof HTMLFormElement
+          ? target
+          : (target.closest("form") as HTMLFormElement | null);
+      if (!form) return;
+      const captured = captureFromElement(form, "submit");
+      if (!captured) return;
+      enqueueStep(captured);
+      return;
+    }
 
     // Label click → associated control
     if (target instanceof HTMLLabelElement || target.closest("label")) {
@@ -39,7 +57,7 @@ function boot() {
       if (control) target = control;
     }
 
-    const interactive = resolveInteractive(target as Element);
+    const interactive = resolveInteractive(target as Element, event.type);
     if (!interactive) return;
 
     if (event.type === "click") {
@@ -65,6 +83,10 @@ function boot() {
 
     const captured = captureFromElement(interactive, event.type);
     if (!captured) return;
+    enqueueStep(captured);
+  };
+
+  function enqueueStep(captured: CapturedStep) {
 
     const fingerprint = `${captured.actionType}|${captured.selector}|${captured.valueEntered || ""}|${captured.description}`;
     const now = Date.now();
@@ -72,19 +94,21 @@ function boot() {
     lastFingerprint = fingerprint;
     lastAt = now;
 
-    void browser.runtime.sendMessage({
-      type: "ADD_STEP",
-      step: {
-        actionType: captured.actionType,
-        elementLabel: captured.elementLabel,
-        selector: captured.selector,
-        valueEntered: captured.valueEntered,
-        pageUrl: captured.pageUrl,
-        description: captured.description,
-        expectedResult: captured.expectedResult,
-      },
-    });
-  };
+    void browser.runtime
+      .sendMessage({
+        type: "ADD_STEP",
+        step: {
+          actionType: captured.actionType,
+          elementLabel: captured.elementLabel,
+          selector: captured.selector,
+          valueEntered: captured.valueEntered,
+          pageUrl: captured.pageUrl,
+          description: captured.description,
+          expectedResult: captured.expectedResult,
+        },
+      })
+      .catch((err) => console.warn("TestBuddy ADD_STEP failed", err));
+  }
 
   function bindListeners() {
     if (listenersBound) return;
@@ -110,6 +134,11 @@ function boot() {
 
   function ensureUi() {
     injectStyles();
+    // Remove any stray duplicates in this document
+    const existing = document.querySelectorAll(`#${ROOT_ID}`);
+    existing.forEach((node, i) => {
+      if (i > 0) node.remove();
+    });
     let root = document.getElementById(ROOT_ID);
     if (!root) {
       root = document.createElement("div");
@@ -120,15 +149,32 @@ function boot() {
   }
 
   function render() {
-    if (!session || (session.status !== "recording" && session.status !== "paused")) {
+    // Only the top frame shows the floating toolbar (fixes stacked duplicate panels in iframes).
+    // Child frames still bind DOM listeners so steps inside iframes are captured.
+    if (!IS_TOP_FRAME) {
       document.getElementById(ROOT_ID)?.remove();
-      unbindListeners();
+      if (session && (session.status === "recording" || session.status === "paused") && !annotating) {
+        bindListeners();
+      } else {
+        unbindListeners();
+      }
+      return;
+    }
+
+    if (
+      annotating ||
+      !session ||
+      (session.status !== "recording" && session.status !== "paused")
+    ) {
+      document.getElementById(ROOT_ID)?.remove();
+      if (!annotating) unbindListeners();
       return;
     }
 
     bindListeners();
     const root = ensureUi();
     const latest = [...session.steps].slice(-8).reverse();
+    const shotCount = session.screenshots?.length || 0;
     root.innerHTML = `
       <div class="rs-bar">
         <div class="rs-top">
@@ -142,18 +188,24 @@ function boot() {
             <span class="rs-count-label">steps</span>
           </div>
         </div>
-        <div class="rs-actions">
+        <div class="rs-actions rs-actions-3">
           ${
             session.status === "recording"
               ? `<button type="button" data-action="pause">Pause</button>`
               : `<button type="button" data-action="resume">Resume</button>`
           }
+          <button type="button" data-action="capture">Screenshot</button>
           <button type="button" class="rs-stop" data-action="stop">Stop</button>
         </div>
+        ${
+          shotCount
+            ? `<div class="rs-shots">${shotCount} screenshot${shotCount === 1 ? "" : "s"} with highlights</div>`
+            : ""
+        }
         <div class="rs-feed" aria-live="polite">
           ${
             latest.length === 0
-              ? `<div class="rs-empty">Interact with the page — steps + expected results appear live.</div>`
+              ? `<div class="rs-empty">Interact with the page — or capture a screenshot to mark the bug.</div>`
               : latest
                   .map(
                     (s) => `
@@ -161,6 +213,7 @@ function boot() {
               <div class="rs-event-head">
                 <span class="rs-event-order">#${s.order}</span>
                 <span class="rs-event-type">${s.actionType}</span>
+                ${s.screenshotId ? `<span class="rs-shot-tag">shot</span>` : ""}
               </div>
               <div class="rs-event-text">${formatBoldHtml(s.description)}</div>
               ${
@@ -184,18 +237,108 @@ function boot() {
         if (action === "pause") void send("PAUSE_RECORDING");
         if (action === "resume") void send("RESUME_RECORDING");
         if (action === "stop") void send("STOP_RECORDING");
+        if (action === "capture") void startScreenshotCapture();
       });
     });
   }
 
-  async function send(type: "PAUSE_RECORDING" | "RESUME_RECORDING" | "STOP_RECORDING") {
+  async function startScreenshotCapture() {
+    if (!IS_TOP_FRAME || annotating || !session) return;
+    statusBeforeAnnotate = session.status;
+    annotating = true;
+    unbindListeners();
+    document.getElementById(ROOT_ID)?.remove();
+
+    // Pause so page clicks during annotate aren't recorded
+    if (statusBeforeAnnotate === "recording") {
+      await send("PAUSE_RECORDING", { skipRender: true });
+    }
+
+    try {
+      const res = (await browser.runtime.sendMessage({ type: "CAPTURE_VISIBLE_TAB" })) as {
+        ok: boolean;
+        dataUrl?: string;
+        error?: string;
+        session?: RecordingSession;
+      };
+      if (!res?.ok || !res.dataUrl) {
+        throw new Error(res?.error || "Could not capture screenshot");
+      }
+
+      openAnnotateEditor({
+        dataUrl: res.dataUrl,
+        onCancel: () => {
+          void finishAnnotate(false);
+        },
+        onSave: (result) => {
+          void (async () => {
+            try {
+              const saveRes = (await browser.runtime.sendMessage({
+                type: "SAVE_BUG_CAPTURE",
+                overview: result.overview,
+                dataUrl: result.dataUrl,
+                pageUrl: location.href,
+                annotations: result.annotations,
+              })) as { ok: boolean; session?: RecordingSession; error?: string };
+
+              if (!saveRes?.ok || !saveRes.session) {
+                throw new Error(saveRes?.error || "Could not save screenshot step");
+              }
+              session = saveRes.session;
+              await finishAnnotate(true);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : "Save failed";
+              console.warn("Save capture failed", err);
+              window.alert(`TestBuddy: screenshot step not saved.\n${msg}`);
+              await finishAnnotate(false);
+            }
+          })();
+        },
+      });
+    } catch (err) {
+      console.warn("Screenshot capture failed", err);
+      const msg = err instanceof Error ? err.message : "Capture failed";
+      window.alert(`TestBuddy: could not capture screenshot.\n${msg}`);
+      await finishAnnotate(false);
+    }
+  }
+
+  async function finishAnnotate(saved: boolean) {
+    annotating = false;
+    const resumeTo = statusBeforeAnnotate;
+    statusBeforeAnnotate = null;
+    if (resumeTo === "recording") {
+      await send("RESUME_RECORDING");
+    } else {
+      // refresh latest session from storage
+      try {
+        const res = (await browser.runtime.sendMessage({ type: "GET_RECORDING_STATE" })) as {
+          ok?: boolean;
+          session?: RecordingSession;
+        };
+        if (res?.ok && res.session) session = res.session;
+      } catch {
+        // ignore
+      }
+      render();
+    }
+    if (saved && session) {
+      // Ensure toolbar shows the new screenshot step immediately
+      render();
+    }
+  }
+
+  async function send(
+    type: "PAUSE_RECORDING" | "RESUME_RECORDING" | "STOP_RECORDING",
+    opts?: { skipRender?: boolean },
+  ) {
     const res = (await browser.runtime.sendMessage({ type })) as {
       ok: boolean;
       session?: RecordingSession;
     };
     if (res?.ok && res.session) {
       session = res.session;
-      render();
+      if (!opts?.skipRender) render();
     }
   }
 
@@ -307,11 +450,38 @@ function isToggle(el: Element) {
   );
 }
 
-function resolveInteractive(el: Element): Element | null {
+function resolveInteractive(el: Element, eventType: string): Element | null {
   const closest = el.closest(
-    "a[href], button, input, textarea, select, [role='button'], [role='link'], [contenteditable='true']",
+    [
+      "a[href]",
+      "button",
+      "input",
+      "textarea",
+      "select",
+      "summary",
+      "[role='button']",
+      "[role='link']",
+      "[role='checkbox']",
+      "[role='radio']",
+      "[role='tab']",
+      "[role='menuitem']",
+      "[role='option']",
+      "[role='switch']",
+      "[contenteditable='true']",
+      "[onclick]",
+      "[tabindex]:not([tabindex='-1'])",
+    ].join(", "),
   );
-  return closest;
+  if (closest) return closest;
+
+  // Modern SPAs often use div/span click targets without ARIA roles —
+  // still record the clicked element so steps aren't silently dropped.
+  if (eventType === "click" && el instanceof HTMLElement) {
+    const clickable = el.closest("div, span, li, td, th, p, section, article, header, footer, nav, main, aside");
+    return clickable || el;
+  }
+
+  return null;
 }
 
 function resolveLabelControl(label: HTMLLabelElement | null): Element | null {
@@ -435,6 +605,13 @@ function resolveLabel(el: Element, kind?: string): string {
     return el.href || "link";
   }
 
+  if (el instanceof HTMLFormElement) {
+    const name = el.getAttribute("name")?.trim() || el.getAttribute("aria-label")?.trim();
+    if (name) return cleanText(name);
+    if (el.id) return cleanText(el.id.replace(/[_-]+/g, " "));
+    return "form";
+  }
+
   if (el instanceof HTMLElement) {
     const text = cleanText(el.innerText || el.textContent || "");
     if (text) return text.slice(0, 80);
@@ -523,11 +700,15 @@ function injectStyles() {
     #${ROOT_ID} .rs-count-num { font-size: 22px; font-weight: 700; color: #0f6e56; letter-spacing: -0.03em; }
     #${ROOT_ID} .rs-count-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #5c6b7a; }
     #${ROOT_ID} .rs-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+    #${ROOT_ID} .rs-actions-3 { grid-template-columns: 1fr 1fr 1fr; }
     #${ROOT_ID} button {
       border: 1px solid #d7dee7; background: #fff; border-radius: 10px;
-      padding: 8px 10px; font-size: 12px; font-weight: 600; cursor: pointer; color: #1a2332;
+      padding: 8px 6px; font-size: 11px; font-weight: 600; cursor: pointer; color: #1a2332;
     }
     #${ROOT_ID} button.rs-stop { background: #0f6e56; border-color: #0f6e56; color: #fff; }
+    #${ROOT_ID} .rs-shots {
+      margin-top: 8px; font-size: 11px; color: #0f6e56; font-weight: 600;
+    }
     #${ROOT_ID} .rs-feed {
       margin-top: 10px; max-height: 220px; overflow: auto;
       display: flex; flex-direction: column; gap: 6px;
@@ -544,6 +725,10 @@ function injectStyles() {
     #${ROOT_ID} .rs-event-type {
       text-transform: uppercase; letter-spacing: 0.04em; color: #5c6b7a; font-size: 10px;
     }
+    #${ROOT_ID} .rs-shot-tag {
+      margin-left: auto; font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em;
+      background: #ffe4e6; color: #be123c; padding: 2px 6px; border-radius: 999px; font-weight: 700;
+    }
     #${ROOT_ID} .rs-event-text { color: #1a2332; line-height: 1.35; }
     #${ROOT_ID} .rs-event-text strong { font-weight: 700; color: #0b4f3d; }
     #${ROOT_ID} .rs-expected {
@@ -555,6 +740,85 @@ function injectStyles() {
     @keyframes rs-pop {
       from { opacity: 0; transform: translateY(4px); }
       to { opacity: 1; transform: translateY(0); }
+    }
+
+    #testbuddy-annotate-overlay {
+      all: initial;
+      position: fixed;
+      inset: 0;
+      z-index: 2147483647;
+      background: rgba(15, 23, 32, 0.72);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      font-family: "Segoe UI", "IBM Plex Sans", sans-serif;
+      color: #1a2332;
+      pointer-events: auto;
+    }
+    #testbuddy-annotate-overlay * { box-sizing: border-box; font-family: inherit; }
+    #testbuddy-annotate-overlay .tb-ann-panel {
+      width: min(980px, 100%);
+      background: #fff;
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.35);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-height: calc(100vh - 32px);
+      pointer-events: auto;
+    }
+    #testbuddy-annotate-overlay .tb-ann-head {
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    #testbuddy-annotate-overlay .tb-ann-head strong { font-size: 16px; }
+    #testbuddy-annotate-overlay .tb-ann-head span { font-size: 12px; color: #5c6b7a; }
+    #testbuddy-annotate-overlay .tb-ann-stage {
+      overflow: auto; background: #0f1720; border-radius: 12px;
+      display: flex; justify-content: center; align-items: center; padding: 8px;
+      pointer-events: auto;
+    }
+    #testbuddy-annotate-overlay .tb-ann-canvas {
+      cursor: crosshair;
+      max-width: 100%;
+      border-radius: 4px;
+      touch-action: none;
+      pointer-events: auto !important;
+      user-select: none;
+      display: block;
+    }
+    #testbuddy-annotate-overlay .tb-ann-status {
+      min-height: 18px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #5c6b7a;
+    }
+    #testbuddy-annotate-overlay .tb-ann-status[data-kind="ok"] { color: #0f6e56; }
+    #testbuddy-annotate-overlay .tb-ann-status[data-kind="error"] { color: #be123c; }
+    #testbuddy-annotate-overlay .tb-ann-label {
+      display: flex; flex-direction: column; gap: 6px;
+      font-size: 12px; font-weight: 600; color: #3d4f5f;
+    }
+    #testbuddy-annotate-overlay .tb-ann-overview {
+      width: 100%; resize: vertical; min-height: 56px;
+      border: 1px solid #d7dee7; border-radius: 10px; padding: 10px;
+      font-size: 13px; font-weight: 400; color: #1a2332;
+      pointer-events: auto;
+    }
+    #testbuddy-annotate-overlay .tb-ann-actions {
+      display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap;
+    }
+    #testbuddy-annotate-overlay .tb-ann-actions button {
+      border: 1px solid #d7dee7; background: #fff; border-radius: 10px;
+      padding: 9px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+      pointer-events: auto;
+    }
+    #testbuddy-annotate-overlay .tb-ann-primary {
+      background: #0f6e56 !important; border-color: #0f6e56 !important; color: #fff !important;
+    }
+    #testbuddy-annotate-overlay .tb-ann-hint {
+      font-size: 11px; color: #5c6b7a;
     }
   `;
   document.documentElement.appendChild(style);

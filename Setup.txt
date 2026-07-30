@@ -3,7 +3,6 @@ TestBuddy — Setup & Run Commands
 
 Prerequisites
 -------------
-- Java 21+
 - Node.js 20+
 - PostgreSQL 18 (local)
   Database : testbuddy
@@ -15,16 +14,17 @@ Prerequisites
 
 1) Create PostgreSQL database (one-time)
 ---------------------------------------
-Open psql as postgres (password: admin), then run:
+Open psql as postgres, then run:
 
   CREATE ROLE admin LOGIN PASSWORD 'admin';
   CREATE DATABASE testbuddy OWNER admin;
 
 
-2) Backend (Spring Boot) — port 8080
-------------------------------------
+2) Backend (Node.js / Express) — port 8080
+------------------------------------------
 cd backend
-.\mvnw.cmd spring-boot:run
+npm install
+npm run dev
 
 Health check: http://localhost:8080/api/health
 
@@ -88,5 +88,4 @@ Bug import JSON           : POST /api/bugs/import
 Notes
 -----
 - Start Backend before Frontend / Extension (they call localhost:8080).
-- If PostgreSQL is unavailable, run backend with H2 fallback:
-    .\mvnw.cmd spring-boot:run "-Dspring-boot.run.arguments=--spring.profiles.active=h2"
+- Copy backend/.env.example to backend/.env if needed (defaults match local Postgres).

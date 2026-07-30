@@ -11,7 +11,7 @@ STAGING = ROOT / "extension" / ".pack-staging" / "TestBuddy"
 ZIP_NAME = "TestBuddy-extension.zip"
 OUTPUTS = [
     ROOT / "frontend" / "public" / ZIP_NAME,
-    ROOT / "backend" / "src" / "main" / "resources" / "static" / "downloads" / ZIP_NAME,
+    ROOT / "backend" / "public" / "downloads" / ZIP_NAME,
 ]
 
 

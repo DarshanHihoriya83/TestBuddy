@@ -10,7 +10,7 @@ Architecture conventions live in [`.cursor/rules/architecture.mdc`](./.cursor/ru
 | Folder | Role |
 |---|---|
 | `extension/` | Chrome/Edge/Firefox MV3 extension (React + TypeScript) |
-| `backend/` | Java Spring Boot API + JWT + JPA |
+| `backend/` | Node.js Express API + JWT + PostgreSQL |
 | `ai-service/` | Python FastAPI AI microservice (hello-world until Phase 3) |
 | `frontend/` | React dashboard (Vite + TanStack Query + Tailwind) |
 
@@ -37,11 +37,12 @@ CREATE DATABASE testbuddy OWNER admin;
 
 ```bash
 cd backend
-./mvnw spring-boot:run
+npm install
+npm run dev
 ```
 
 Uses PostgreSQL `localhost:5432/testbuddy` (admin/admin) by default.
-No Postgres available? Fall back to H2: `./mvnw spring-boot:run "-Dspring-boot.run.arguments=--spring.profiles.active=h2"`
+Copy `.env.example` to `.env` to override.
 
 Seeded users (password for all: `password`):
 

@@ -32,7 +32,7 @@ Either way, the finished item can be exported (Excel/JSON) or pushed straight in
 | Layer | Technology | Notes |
 |---|---|---|
 | Browser extension | TypeScript + React, Manifest V3 | Extensions can only run JS/TS — a browser platform rule, not a stack choice. Use `webextension-polyfill` so the same code runs on Chrome, Edge, and Firefox (Firefox has supported MV3 since Firefox 109, alongside continued MV2 support). |
-| Backend API | Java 21, Spring Boot 3.x, Spring Data JPA, Spring Security (JWT), PostgreSQL | |
+| Backend API | Node.js, Express, PostgreSQL (`pg`), JWT, bcrypt | |
 | AI microservice | Python 3.11+, FastAPI, an LLM API (Claude or OpenAI both work) | Internal-only service, called by the backend — never exposed to the browser directly. |
 | Frontend dashboard | React + TypeScript, Vite, TanStack Query, Tailwind CSS | This is the "our application" the spec references — where users/projects/cycles are managed and bugs/test cases get reviewed. |
 | File storage | S3-compatible object storage (AWS S3 / Azure Blob / MinIO locally) | Videos and screenshots — don't store large binaries in Postgres. |
@@ -46,7 +46,7 @@ Either way, the finished item can be exported (Excel/JSON) or pushed straight in
 Browser Extension (TS/React, content script + popup)
         │  REST/HTTPS (JWT)
         ▼
-Java Backend API (Spring Boot) ───────► PostgreSQL
+Node Backend API (Express) ───────► PostgreSQL
         │  internal REST                  ▲
         ▼                                  │
 Python AI Service (FastAPI)                │
@@ -56,12 +56,12 @@ Python AI Service (FastAPI)                │
    expected results,                       │
    generated test cases  ──────────────────┘
 
-Java Backend API
+Node Backend API
         ├──► Object Storage (video/screenshots)
         ├──► Jira REST API
         └──► Azure DevOps REST API
 
-React Frontend Dashboard ──► same Java Backend API
+React Frontend Dashboard ──► same Node Backend API
    (bugs, test cases, users, projects, cycles, integration settings)
 ```
 
@@ -299,7 +299,7 @@ I'm building ReproScribe — a browser extension + web platform that
 records a browser session and turns it into either a bug report or a
 set of test cases. Full spec, architecture, data model and API are in
 PROJECT_SPEC.md in this repo. Fixed stack: TypeScript/React for the
-extension and frontend, Java 21/Spring Boot for the backend,
+extension and frontend, Node.js/Express for the backend,
 Python/FastAPI for the AI microservice, PostgreSQL.
 
 For now, only do Phase 0 and Phase 1 from the "Suggested build phases"

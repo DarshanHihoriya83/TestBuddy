@@ -18,7 +18,7 @@ Full product spec: `PROJECT_SPEC.md`. Build only the current phase; do not skip 
 | Layer | Tech |
 |---|---|
 | Extension | TypeScript + React, Manifest V3, `webextension-polyfill` |
-| Backend | Java 21, Spring Boot 3.x, Spring Data JPA, Spring Security JWT, PostgreSQL |
+| Backend | Node.js, Express, PostgreSQL (`pg`), JWT (jsonwebtoken), bcrypt |
 | AI service | Python 3.11+, FastAPI, LLM API — **internal only**, never browser-facing |
 | Frontend | React + TypeScript, Vite, TanStack Query, Tailwind CSS |
 | Files | S3-compatible object storage (not Postgres) |
@@ -33,18 +33,18 @@ extension/   backend/   ai-service/   frontend/
 ## Architecture
 
 ```
-Extension ──JWT/REST──► Java Backend ──► PostgreSQL
+Extension ──JWT/REST──► Node Backend ──► PostgreSQL
                             │
                             ├──► AI service (internal)
                             ├──► Object storage
                             └──► Jira / Azure DevOps
 
-Frontend dashboard ──► same Java Backend
+Frontend dashboard ──► same Node Backend
 ```
 
 ## Shared domain shapes
 
-Mirror these as JPA entities (backend) and TypeScript interfaces (frontend + extension):
+Mirror these in the Node backend (DB rows / mappers) and as TypeScript interfaces (frontend + extension):
 
 - `User` — roles: ADMIN | TESTER | DEVELOPER | MANAGER
 - `Project` — optional jiraProjectKey, adoOrgUrl, adoProject

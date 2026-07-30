@@ -240,6 +240,13 @@ button.linkish {
   color: var(--muted);
 }
 
+.live-shots {
+  margin-top: 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
 .live-feed {
   max-height: 280px;
   overflow: auto;

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TestBuddy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Capture bugs and generate test cases from browser sessions.",
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": [
