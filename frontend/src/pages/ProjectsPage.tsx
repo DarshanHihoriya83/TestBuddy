@@ -131,7 +131,16 @@ export function ProjectsPage() {
 
       {projectsQuery.isLoading && <p className="text-sm text-[var(--muted)]">Loading projects…</p>}
       {projectsQuery.error && (
-        <p className="tb-alert-error mb-4">{(projectsQuery.error as Error).message}</p>
+        <div className="tb-alert-error mb-4 flex flex-wrap items-center justify-between gap-3">
+          <span>{(projectsQuery.error as Error).message}</span>
+          <button
+            type="button"
+            className="tb-btn-ghost bg-white px-3 py-1 text-xs"
+            onClick={() => void projectsQuery.refetch()}
+          >
+            Retry
+          </button>
+        </div>
       )}
 
       <div className="tb-table-wrap">
@@ -179,7 +188,7 @@ export function ProjectsPage() {
                       onClick={() => {
                         if (
                           window.confirm(
-                            `Delete project "${project.name}"? This only works if it has no bugs.`,
+                            `Delete project "${project.name}"? This also deletes all bugs in the project.`,
                           )
                         ) {
                           deleteMutation.mutate(project.id);

@@ -9,6 +9,7 @@ import {
   getApiBase,
   getToken,
   login,
+  polishBugWithAi,
   setSession,
 } from "./api";
 import {
@@ -44,6 +45,7 @@ export function PopupApp() {
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState<RecordingSession>(EMPTY_SESSION);
   const [polishMsg, setPolishMsg] = useState<string | null>(null);
+  const [polishBusy, setPolishBusy] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -124,42 +126,59 @@ export function PopupApp() {
     [recording, busy],
   );
 
-  function onRegenerateTitle() {
+  async function generateWithAi(mode: "both" | "title" | "description") {
     const source = title.trim() || description.trim();
     if (!source) {
-      setError("Type a rough title or description first, then Regenerate");
+      setError("Type a rough title or description first, then Generate");
       return;
     }
     setError(null);
-    const next = polishBugTitle(title, description);
-    setTitle(next);
-    setPolishMsg("Title polished (Normalize → Understand → Title → QA)");
+    setPolishMsg(null);
+    setPolishBusy(true);
+    try {
+      const result = await polishBugWithAi({
+        title: title.trim(),
+        description: description.trim(),
+        mode,
+      });
+      if (mode === "title" || mode === "both") setTitle(result.title);
+      if (mode === "description" || mode === "both") setDescription(result.description);
+      const who = result.ai
+        ? `AI (${result.provider || "LLM"})`
+        : `local polish${result.warning ? " — set GROQ_API_KEY for ChatGPT-level AI" : ""}`;
+      setPolishMsg(`Generated with ${who}`);
+    } catch (err) {
+      // Offline / AI down → local professional polish
+      if (mode === "title") {
+        setTitle(polishBugTitle(title, description));
+      } else if (mode === "description") {
+        const nextTitle = title.trim()
+          ? polishBugTitle(title, description)
+          : polishBugTitle(description);
+        if (!title.trim()) setTitle(nextTitle);
+        setDescription(polishBugDescription(description, title, nextTitle));
+      } else {
+        const polished = polishBugCopy(title, description);
+        setTitle(polished.title);
+        setDescription(polished.description);
+      }
+      const msg = err instanceof Error ? err.message : "AI unavailable";
+      setPolishMsg(`Used offline polish (AI unreachable: ${msg.slice(0, 80)})`);
+    } finally {
+      setPolishBusy(false);
+    }
+  }
+
+  function onRegenerateTitle() {
+    void generateWithAi("title");
   }
 
   function onRegenerateDescription() {
-    const source = description.trim() || title.trim();
-    if (!source) {
-      setError("Type a rough description or title first, then Regenerate");
-      return;
-    }
-    setError(null);
-    const nextTitle = title.trim() ? polishBugTitle(title, description) : polishBugTitle(description);
-    if (!title.trim()) setTitle(nextTitle);
-    setDescription(polishBugDescription(description, title, nextTitle));
-    setPolishMsg("Description polished (Summary / Observed / Expected)");
+    void generateWithAi("description");
   }
 
   function onPolishBoth() {
-    const source = title.trim() || description.trim();
-    if (!source) {
-      setError("Enter a rough title or description first");
-      return;
-    }
-    setError(null);
-    const polished = polishBugCopy(title, description);
-    setTitle(polished.title);
-    setDescription(polished.description);
-    setPolishMsg("Both polished with multi-step QA generator");
+    void generateWithAi("both");
   }
 
   async function onLogin(e: FormEvent) {
@@ -268,14 +287,30 @@ export function PopupApp() {
           valueEntered: step.valueEntered,
           pageUrl: step.pageUrl,
           description: step.description,
+          actualResult: step.actualResult,
+          expectedResult: step.expectedResult?.trim() ? step.expectedResult : undefined,
           screenshotId: step.screenshotId,
+        })),
+        screenshots: (recording.screenshots || []).map((shot) => ({
+          id: shot.id,
+          dataUrl: shot.dataUrl,
+          overview: shot.overview,
+          pageUrl: shot.pageUrl,
+          createdAt: shot.createdAt,
+          annotations: shot.annotations,
         })),
       });
       await browser.runtime.sendMessage({ type: "CLEAR_RECORDING" });
       setRecording(EMPTY_SESSION);
       setTitle("");
       setDescription("");
-      setMessage(`Bug created with ${bug.steps.length} steps: ${bug.id}`);
+      setMessage(
+        `Bug created with ${bug.steps.length} steps` +
+          (bug.screenshots?.length
+            ? ` and ${bug.screenshots.length} screenshot(s)`
+            : "") +
+          `: ${bug.id}`,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Create failed");
     } finally {
@@ -362,9 +397,23 @@ export function PopupApp() {
                   <div className="live-event-head">
                     <span className="live-order">Step {step.order}</span>
                     <span className="live-type">{step.actionType}</span>
-                    <span className="live-actual-tag">Actual step</span>
+                    {step.expectedResult ? (
+                      <span className="live-bug-tag">Bug step</span>
+                    ) : null}
                   </div>
-                  <div className="live-desc">{renderBoldText(step.description)}</div>
+                  <div className="live-desc">
+                    <strong>Step:</strong> {renderBoldText(step.description)}
+                  </div>
+                  {step.actualResult ? (
+                    <div className="live-actual">
+                      <strong>Actual:</strong> {renderBoldText(step.actualResult)}
+                    </div>
+                  ) : null}
+                  {step.expectedResult ? (
+                    <div className="live-expected">
+                      <strong>Expected:</strong> {renderBoldText(step.expectedResult)}
+                    </div>
+                  ) : null}
                 </div>
               ))
             )}
@@ -430,9 +479,9 @@ export function PopupApp() {
               type="button"
               className="regen-btn"
               onClick={onRegenerateTitle}
-              disabled={!title.trim() && !description.trim()}
+              disabled={polishBusy || (!title.trim() && !description.trim())}
             >
-              {title.trim() ? "Regenerate" : "Generate"}
+              {polishBusy ? "AI…" : title.trim() ? "Regenerate" : "Generate"}
             </button>
           </div>
           <input
@@ -454,9 +503,9 @@ export function PopupApp() {
               type="button"
               className="regen-btn"
               onClick={onRegenerateDescription}
-              disabled={!title.trim() && !description.trim()}
+              disabled={polishBusy || (!title.trim() && !description.trim())}
             >
-              {description.trim() ? "Regenerate" : "Generate"}
+              {polishBusy ? "AI…" : description.trim() ? "Regenerate" : "Generate"}
             </button>
           </div>
           <textarea
@@ -474,9 +523,9 @@ export function PopupApp() {
             type="button"
             className="polish-both"
             onClick={onPolishBoth}
-            disabled={!title.trim() && !description.trim()}
+            disabled={polishBusy || (!title.trim() && !description.trim())}
           >
-            Polish title &amp; description
+            {polishBusy ? "Generating with AI…" : "✨ AI polish title & description"}
           </button>
           {polishMsg && <div className="status polish-ok">{polishMsg}</div>}
 
@@ -546,8 +595,8 @@ export function PopupApp() {
           {error && <div className="status error">{error}</div>}
           {message && <div className="status">{message}</div>}
           <p className="hint">
-            Tip: rough notes OK — e.g. &quot;mobile numbe not Digit&quot; → polished title &amp;
-            structured description via <strong>Polish</strong> / <strong>Regenerate</strong>.
+            Tip: write rough notes (Hinglish OK) → tap <strong>AI polish</strong>. Uses Groq /
+            OpenAI / Claude via the AI service for ChatGPT-quality titles &amp; descriptions.
           </p>
         </form>
       ) : (

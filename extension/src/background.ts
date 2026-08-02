@@ -8,8 +8,9 @@ import {
   type RecordingSession,
 } from "./recording";
 import type { Step } from "./types";
-import { buildActualStepDescription } from "./stepText";
-import { buildObservationFromOverview } from "./content/bugCapture";
+import { buildActualResult, buildStepAction } from "./stepText";
+import { buildObservationFromOverview, type Annotation } from "./content/bugCapture";
+import { compressDataUrlForStorage } from "./utils/imageCompress";
 
 let writeChain: Promise<unknown> = Promise.resolve();
 
@@ -114,9 +115,13 @@ async function addStep(partial: Omit<Step, "order">) {
     if (session.status !== "recording" && session.status !== "paused") {
       return session;
     }
-    // Bug mode: store actual steps only — never expected-result text.
-    const { expectedResult: _ignored, ...actual } = partial;
-    const step: Step = { ...actual, order: session.steps.length + 1 };
+    // Keep expectedResult only when explicitly set (defect/screenshot step).
+    const expected = partial.expectedResult?.trim() || undefined;
+    const step: Step = {
+      ...partial,
+      expectedResult: expected,
+      order: session.steps.length + 1,
+    };
     return { ...session, steps: [...session.steps, step] };
   });
 }
@@ -133,7 +138,11 @@ async function addNavigateStep(url: string) {
       elementLabel,
       selector: "",
       pageUrl: url,
-      description: buildActualStepDescription({
+      description: buildStepAction({
+        actionType: "navigate",
+        elementLabel,
+      }),
+      actualResult: buildActualResult({
         actionType: "navigate",
         elementLabel,
       }),
@@ -160,9 +169,9 @@ async function captureVisibleTab(): Promise<string> {
   if (windowId == null) {
     throw new Error("No browser window available for screenshot");
   }
+  // PNG = full fidelity of the visible tab (sharp text). Compress later on save.
   const dataUrl = await browser.tabs.captureVisibleTab(windowId, {
-    format: "jpeg",
-    quality: 70,
+    format: "png",
   });
   if (!dataUrl) throw new Error("Screenshot capture failed");
   return dataUrl;
@@ -172,7 +181,7 @@ async function saveBugCapture(args: {
   overview: string;
   dataUrl: string;
   pageUrl: string;
-  annotations: { type: "rect"; x: number; y: number; w: number; h: number }[];
+  annotations: Annotation[];
 }) {
   const id = crypto.randomUUID();
   const overview = args.overview.trim();
@@ -183,10 +192,10 @@ async function saveBugCapture(args: {
     throw new Error("Draw a highlight on the screenshot before saving");
   }
 
-  // Keep image smaller for chrome.storage quota
+  // Already sharp-encoded in annotate editor; light storage pass if still huge
   let dataUrl = args.dataUrl;
-  if (dataUrl.length > 900_000) {
-    dataUrl = await shrinkDataUrl(dataUrl, 0.55);
+  if (dataUrl.length > 1_200_000) {
+    dataUrl = await compressDataUrlForStorage(dataUrl);
   }
 
   return enqueueWrite(async (session) => {
@@ -215,27 +224,6 @@ async function saveBugCapture(args: {
       screenshots: [...(session.screenshots || []), shot],
     };
   });
-}
-
-async function shrinkDataUrl(dataUrl: string, quality: number): Promise<string> {
-  // OffscreenCanvas may be unavailable in SW — return original if so.
-  try {
-    const res = await fetch(dataUrl);
-    const blob = await res.blob();
-    const bitmap = await createImageBitmap(blob);
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return dataUrl;
-    ctx.drawImage(bitmap, 0, 0);
-    const out = await canvas.convertToBlob({ type: "image/jpeg", quality });
-    const buffer = await out.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
-    return `data:image/jpeg;base64,${btoa(binary)}`;
-  } catch {
-    return dataUrl;
-  }
 }
 
 browser.runtime.onMessage.addListener((message: unknown) => {

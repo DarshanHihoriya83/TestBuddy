@@ -8,6 +8,11 @@ import {
   unauthorized,
 } from "../errors.js";
 import { generateToken } from "./jwt.js";
+import {
+  deleteScreenshotFile,
+  saveScreenshotFile,
+  readScreenshotFile,
+} from "./screenshotStorage.js";
 
 function blankToNull(value) {
   if (value == null || String(value).trim() === "") return null;
@@ -42,12 +47,13 @@ function toStepDto(step) {
     valueEntered: step.value_entered,
     pageUrl: step.page_url,
     description: step.description,
-    expectedResult: step.expected_result,
+    actualResult: step.actual_result ?? null,
+    expectedResult: step.expected_result ?? null,
     screenshotId: step.screenshot_id,
   };
 }
 
-function toBugDto(bug, steps) {
+function toBugDto(bug, steps, screenshots = []) {
   return {
     id: bug.id,
     title: bug.title,
@@ -60,12 +66,25 @@ function toBugDto(bug, steps) {
     projectId: bug.project_id,
     status: bug.status,
     steps: steps.map(toStepDto),
+    screenshots: screenshots.map(toScreenshotDto),
     externalRefs: {
       jiraIssueKey: bug.jira_issue_key,
       adoWorkItemId: bug.ado_work_item_id,
     },
     createdAt: bug.created_at,
     updatedAt: bug.updated_at,
+  };
+}
+
+function toScreenshotDto(row) {
+  return {
+    id: row.id,
+    overview: row.overview ?? "",
+    pageUrl: row.page_url ?? "",
+    url: `/api/screenshots/${row.id}`,
+    contentType: row.content_type,
+    annotations: row.annotations ?? [],
+    createdAt: row.created_at,
   };
 }
 
@@ -76,6 +95,23 @@ async function loadSteps(bugId, client = null) {
     [bugId],
   );
   return rows;
+}
+
+async function loadScreenshots(bugId, client = null) {
+  const q = client ? client.query.bind(client) : query;
+  const { rows } = await q(
+    `SELECT * FROM screenshots WHERE bug_id = $1 ORDER BY created_at ASC`,
+    [bugId],
+  );
+  return rows;
+}
+
+async function hydrateBug(bug, client = null) {
+  const [steps, screenshots] = await Promise.all([
+    loadSteps(bug.id, client),
+    loadScreenshots(bug.id, client),
+  ]);
+  return toBugDto(bug, steps, screenshots);
 }
 
 async function requireProject(id) {
@@ -111,8 +147,8 @@ async function replaceSteps(client, bugId, steps) {
     await client.query(
       `INSERT INTO bug_steps (
         id, bug_id, step_order, action_type, element_label, selector,
-        value_entered, page_url, description, expected_result, screenshot_id
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        value_entered, page_url, description, actual_result, expected_result, screenshot_id
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [
         randomUUID(),
         bugId,
@@ -123,7 +159,9 @@ async function replaceSteps(client, bugId, steps) {
         step.valueEntered ?? null,
         step.pageUrl ?? "",
         step.description,
-        null, // Bugs store actual steps only; expected_result is for test cases later
+        step.actualResult ?? null,
+        // Expected only when provided (defect step); blank for other steps
+        step.expectedResult?.trim() ? step.expectedResult.trim() : null,
         step.screenshotId ?? null,
       ],
     );
@@ -247,16 +285,41 @@ export async function updateProject(id, { name, jiraProjectKey, adoOrgUrl, adoPr
 
 export async function deleteProject(id) {
   await requireProject(id);
-  const bugs = await query(`SELECT COUNT(*)::int AS c FROM bugs WHERE project_id = $1`, [id]);
-  if (bugs.rows[0].c > 0) {
-    throw conflict(
-      `Cannot delete project with ${bugs.rows[0].c} bug(s). Move or delete bugs first.`,
-    );
-  }
+  const shots = await query(
+    `SELECT s.storage_path FROM screenshots s
+     JOIN bugs b ON b.id = s.bug_id
+     WHERE b.project_id = $1`,
+    [id],
+  );
   await withTransaction(async (client) => {
+    await client.query(
+      `DELETE FROM bug_steps WHERE bug_id IN (SELECT id FROM bugs WHERE project_id = $1)`,
+      [id],
+    );
+    await client.query(
+      `DELETE FROM screenshots WHERE bug_id IN (SELECT id FROM bugs WHERE project_id = $1)`,
+      [id],
+    );
+    await client.query(`DELETE FROM bugs WHERE project_id = $1`, [id]);
     await client.query(`DELETE FROM cycles WHERE project_id = $1`, [id]);
     await client.query(`DELETE FROM projects WHERE id = $1`, [id]);
   });
+  for (const row of shots.rows) {
+    await deleteScreenshotFile(row.storage_path);
+  }
+}
+
+export async function deleteBug(id) {
+  await requireBug(id);
+  const shots = await query(`SELECT storage_path FROM screenshots WHERE bug_id = $1`, [id]);
+  await withTransaction(async (client) => {
+    await client.query(`DELETE FROM bug_steps WHERE bug_id = $1`, [id]);
+    await client.query(`DELETE FROM screenshots WHERE bug_id = $1`, [id]);
+    await client.query(`DELETE FROM bugs WHERE id = $1`, [id]);
+  });
+  for (const row of shots.rows) {
+    await deleteScreenshotFile(row.storage_path);
+  }
 }
 
 export async function listCycles(projectId) {
@@ -299,7 +362,7 @@ export async function listBugs(filters) {
   );
   const result = [];
   for (const bug of rows) {
-    result.push(toBugDto(bug, await loadSteps(bug.id)));
+    result.push(await hydrateBug(bug));
   }
   return result;
 }
@@ -324,7 +387,31 @@ export async function importBugs({ bugs }, reporter) {
 
 export async function getBug(id) {
   const bug = await requireBug(id);
-  return toBugDto(bug, await loadSteps(id));
+  return hydrateBug(bug);
+}
+
+async function persistScreenshots(client, bugId, screenshots) {
+  if (!screenshots?.length) return;
+  for (const shot of screenshots) {
+    if (!shot?.id || !shot?.dataUrl) continue;
+    const { contentType, storagePath } = await saveScreenshotFile(shot.id, shot.dataUrl);
+    await client.query(
+      `INSERT INTO screenshots (
+        id, bug_id, overview, page_url, content_type, storage_path, annotations, created_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      ON CONFLICT (id) DO NOTHING`,
+      [
+        shot.id,
+        bugId,
+        shot.overview ?? "",
+        shot.pageUrl ?? "",
+        contentType,
+        storagePath,
+        JSON.stringify(shot.annotations ?? []),
+        shot.createdAt ? new Date(shot.createdAt) : new Date(),
+      ],
+    );
+  }
 }
 
 export async function createBug(request, reporter) {
@@ -354,8 +441,8 @@ export async function createBug(request, reporter) {
       ],
     );
     await replaceSteps(client, id, request.steps);
-    const steps = await loadSteps(id, client);
-    return toBugDto(rows[0], steps);
+    await persistScreenshots(client, id, request.screenshots);
+    return hydrateBug(rows[0], client);
   });
 }
 
@@ -385,7 +472,18 @@ export async function updateBug(id, request) {
       ],
     );
     await replaceSteps(client, id, request.steps);
-    const steps = await loadSteps(id, client);
-    return toBugDto(rows[0], steps);
+    return hydrateBug(rows[0], client);
   });
+}
+
+export async function getScreenshot(id) {
+  const { rows } = await query(`SELECT * FROM screenshots WHERE id = $1`, [id]);
+  if (!rows[0]) throw notFound("Screenshot not found");
+  return rows[0];
+}
+
+export async function readScreenshotBytes(id) {
+  const row = await getScreenshot(id);
+  const buffer = await readScreenshotFile(row.storage_path);
+  return { row, buffer };
 }

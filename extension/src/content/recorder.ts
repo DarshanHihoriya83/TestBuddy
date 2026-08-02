@@ -1,6 +1,6 @@
 import browser from "webextension-polyfill";
 import type { RecordingSession } from "../recording";
-import { buildActualStepDescription, formatBoldHtml } from "../stepText";
+import { buildActualResult, buildStepAction, formatBoldHtml } from "../stepText";
 import type { Step, StepActionType } from "../types";
 import { openAnnotateEditor } from "./annotateOverlay";
 
@@ -104,6 +104,8 @@ function boot() {
           valueEntered: captured.valueEntered,
           pageUrl: captured.pageUrl,
           description: captured.description,
+          actualResult: captured.actualResult,
+          expectedResult: captured.expectedResult,
         },
       })
       .catch((err) => console.warn("TestBuddy ADD_STEP failed", err));
@@ -212,10 +214,19 @@ function boot() {
               <div class="rs-event-head">
                 <span class="rs-event-order">Step ${s.order}</span>
                 <span class="rs-event-type">${s.actionType}</span>
-                ${s.screenshotId ? `<span class="rs-shot-tag">shot</span>` : ""}
-                <span class="rs-actual-tag">Actual step</span>
+                ${s.screenshotId ? `<span class="rs-shot-tag">bug</span>` : ""}
               </div>
-              <div class="rs-event-text">${formatBoldHtml(s.description)}</div>
+              <div class="rs-event-text"><strong>Step:</strong> ${formatBoldHtml(s.description)}</div>
+              ${
+                s.actualResult
+                  ? `<div class="rs-actual"><strong>Actual:</strong> ${formatBoldHtml(s.actualResult)}</div>`
+                  : ""
+              }
+              ${
+                s.expectedResult
+                  ? `<div class="rs-expected"><strong>Expected:</strong> ${formatBoldHtml(s.expectedResult)}</div>`
+                  : ""
+              }
             </div>`,
                   )
                   .join("")
@@ -367,7 +378,13 @@ function captureFromElement(el: Element, eventType: string): CapturedStep | null
 
   const elementLabel = resolveLabel(el, kind);
   const valueEntered = readDisplayValue(el);
-  const description = buildActualStepDescription({
+  const description = buildStepAction({
+    actionType,
+    elementLabel,
+    valueEntered,
+    elementKind: kind,
+  });
+  const actualResult = buildActualResult({
     actionType,
     elementLabel,
     valueEntered,
@@ -381,6 +398,8 @@ function captureFromElement(el: Element, eventType: string): CapturedStep | null
     valueEntered,
     pageUrl: location.href,
     description,
+    actualResult,
+    // Expected blank on normal steps — only defect/screenshot step gets it
     elementKind: kind,
   };
 }
@@ -726,12 +745,16 @@ function injectStyles() {
     }
     #${ROOT_ID} .rs-event-text { color: #1a2332; line-height: 1.35; }
     #${ROOT_ID} .rs-event-text strong { font-weight: 700; color: #0b4f3d; }
-    #${ROOT_ID} .rs-expected {
-      margin-top: 4px; padding-top: 4px; border-top: 1px dashed #b7d7cb;
-      color: #3d4f5f; font-size: 10.5px; line-height: 1.35;
+    #${ROOT_ID} .rs-actual {
+      margin-top: 4px; color: #1a2332; font-size: 10.5px; line-height: 1.35;
     }
-    #${ROOT_ID} .rs-expected span { font-weight: 700; color: #5c6b7a; margin-right: 4px; }
-    #${ROOT_ID} .rs-expected strong { font-weight: 700; color: #0b4f3d; }
+    #${ROOT_ID} .rs-actual strong { font-weight: 700; color: #0f6e56; margin-right: 4px; }
+    #${ROOT_ID} .rs-actual strong + * , #${ROOT_ID} .rs-actual { }
+    #${ROOT_ID} .rs-expected {
+      margin-top: 4px; padding-top: 4px; border-top: 1px dashed #f0b4b4;
+      color: #9b1c1c; font-size: 10.5px; line-height: 1.35;
+    }
+    #${ROOT_ID} .rs-expected strong { font-weight: 700; color: #9b1c1c; margin-right: 4px; }
     @keyframes rs-pop {
       from { opacity: 0; transform: translateY(4px); }
       to { opacity: 1; transform: translateY(0); }
@@ -742,47 +765,100 @@ function injectStyles() {
       position: fixed;
       inset: 0;
       z-index: 2147483647;
-      background: rgba(15, 23, 32, 0.72);
+      background: rgba(15, 23, 32, 0.78);
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 16px;
+      padding: 12px;
       font-family: "Segoe UI", "IBM Plex Sans", sans-serif;
       color: #1a2332;
       pointer-events: auto;
     }
     #testbuddy-annotate-overlay * { box-sizing: border-box; font-family: inherit; }
     #testbuddy-annotate-overlay .tb-ann-panel {
-      width: min(980px, 100%);
+      width: min(1180px, 100%);
       background: #fff;
       border-radius: 16px;
-      padding: 14px;
-      box-shadow: 0 24px 64px rgba(0,0,0,0.35);
+      padding: 12px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.4);
       display: flex;
       flex-direction: column;
       gap: 10px;
-      max-height: calc(100vh - 32px);
+      max-height: calc(100vh - 24px);
       pointer-events: auto;
     }
     #testbuddy-annotate-overlay .tb-ann-head {
-      display: flex; flex-direction: column; gap: 2px;
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
     }
-    #testbuddy-annotate-overlay .tb-ann-head strong { font-size: 16px; }
+    #testbuddy-annotate-overlay .tb-ann-head strong { display:block; font-size: 16px; }
     #testbuddy-annotate-overlay .tb-ann-head span { font-size: 12px; color: #5c6b7a; }
-    #testbuddy-annotate-overlay .tb-ann-stage {
-      overflow: auto; background: #0f1720; border-radius: 12px;
-      display: flex; justify-content: center; align-items: center; padding: 8px;
+    #testbuddy-annotate-overlay .tb-ann-quality {
+      flex-shrink: 0;
+      font-size: 11px;
+      font-weight: 700;
+      color: #0f6e56;
+      background: #e7f8f1;
+      border-radius: 999px;
+      padding: 4px 10px;
+      white-space: nowrap;
+    }
+    #testbuddy-annotate-overlay .tb-ann-workspace {
+      display: flex;
+      gap: 10px;
+      align-items: stretch;
+      min-height: 0;
+    }
+    #testbuddy-annotate-overlay .tb-ann-toolbar {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 6px;
+      background: #0f172a;
+      border-radius: 14px;
+      align-items: center;
+    }
+    #testbuddy-annotate-overlay .tb-ann-toolbar button {
+      width: 36px; height: 36px;
+      border: none; border-radius: 10px;
+      background: transparent; color: #e2e8f0;
+      font-size: 15px; font-weight: 700; cursor: pointer;
       pointer-events: auto;
+    }
+    #testbuddy-annotate-overlay .tb-ann-toolbar button:hover {
+      background: rgba(255,255,255,0.1);
+    }
+    #testbuddy-annotate-overlay .tb-ann-toolbar button.is-active {
+      background: #0d9488; color: #fff;
+    }
+    #testbuddy-annotate-overlay .tb-ann-sep {
+      width: 24px; height: 1px; background: rgba(255,255,255,0.2); margin: 2px 0;
+    }
+    #testbuddy-annotate-overlay .tb-ann-colors {
+      display: flex; flex-direction: column; gap: 5px; padding-top: 2px;
+    }
+    #testbuddy-annotate-overlay .tb-ann-colors button {
+      width: 18px; height: 18px; border-radius: 999px;
+      background: var(--swatch); border: 2px solid transparent; padding: 0;
+    }
+    #testbuddy-annotate-overlay .tb-ann-colors button.is-active {
+      outline: 2px solid #fff; outline-offset: 1px;
+    }
+    #testbuddy-annotate-overlay .tb-ann-stage {
+      flex: 1;
+      overflow: auto; background: #0f1720; border-radius: 12px;
+      display: flex; justify-content: center; align-items: center; padding: 10px;
+      pointer-events: auto; min-width: 0;
     }
     #testbuddy-annotate-overlay .tb-ann-canvas {
       cursor: crosshair;
-      max-width: 100%;
       border-radius: 4px;
       touch-action: none;
       pointer-events: auto !important;
       user-select: none;
       display: block;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
     }
+    #testbuddy-annotate-overlay .tb-ann-canvas[data-tool="text"] { cursor: text; }
     #testbuddy-annotate-overlay .tb-ann-status {
       min-height: 18px;
       font-size: 12px;
@@ -796,7 +872,7 @@ function injectStyles() {
       font-size: 12px; font-weight: 600; color: #3d4f5f;
     }
     #testbuddy-annotate-overlay .tb-ann-overview {
-      width: 100%; resize: vertical; min-height: 56px;
+      width: 100%; resize: vertical; min-height: 52px;
       border: 1px solid #d7dee7; border-radius: 10px; padding: 10px;
       font-size: 13px; font-weight: 400; color: #1a2332;
       pointer-events: auto;

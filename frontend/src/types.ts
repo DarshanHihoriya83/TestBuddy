@@ -48,11 +48,23 @@ export interface Step {
   selector: string;
   valueEntered?: string;
   pageUrl: string;
-  /** What actually happened (bug repro). Past-tense action text. */
+  /** Steps column — action performed */
   description: string;
-  /** Test-case only — not used for bug reproduction steps. */
+  /** Actual Result — outcome of this step */
+  actualResult?: string;
+  /** Expected Result — only on the defect step; blank otherwise */
   expectedResult?: string;
   screenshotId?: string;
+}
+
+export interface BugScreenshot {
+  id: string;
+  overview: string;
+  pageUrl: string;
+  url: string;
+  contentType?: string;
+  annotations?: { type: string; x: number; y: number; w: number; h: number }[];
+  createdAt: string;
 }
 
 export interface Bug {
@@ -67,6 +79,7 @@ export interface Bug {
   projectId: string;
   status: BugStatus;
   steps: Step[];
+  screenshots?: BugScreenshot[];
   externalRefs?: { jiraIssueKey?: string; adoWorkItemId?: string };
   createdAt: string;
   updatedAt: string;

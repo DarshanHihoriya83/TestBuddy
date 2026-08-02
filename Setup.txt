@@ -52,15 +52,25 @@ Chrome: chrome://extensions → Developer mode → Load unpacked
 Select the unzipped "TestBuddy" folder (contains manifest.json).
 
 
-5) AI service (optional, hello-world only)
------------------------------------------
+5) AI service (title/description polish) — port 8001
+----------------------------------------------------
 cd ai-service
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
+
+# Create .env (copy from .env.example) and set ONE key:
+#   GROQ_API_KEY=...          (recommended, free: https://console.groq.com/keys)
+#   or OPENAI_API_KEY=...
+#   or ANTHROPIC_API_KEY=...
+
 uvicorn main:app --reload --port 8001
 
-Health check: http://127.0.0.1:8001/health
+Health: http://localhost:8001/health
+Polish: POST /ai/bug/polish  (called by backend only)
+
+Also add to backend/.env:
+  AI_SERVICE_URL=http://127.0.0.1:8001
 
 
 Demo login

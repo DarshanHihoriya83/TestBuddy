@@ -6,13 +6,20 @@ import { TopNavBar } from "../components/AppNavigation";
 import { validateEmail } from "../utils/validation";
 
 export function LoginPage() {
-  const { token, setSession } = useAuth();
+  const { token, ready, setSession } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState(import.meta.env.DEV ? "alice@testbuddy.local" : "");
-  const [password, setPassword] = useState(import.meta.env.DEV ? "password" : "");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  if (!ready) {
+    return (
+      <div className="grid min-h-screen place-items-center text-sm text-[var(--muted)]">
+        Checking session…
+      </div>
+    );
+  }
   if (token) return <Navigate to="/bugs" replace />;
 
   async function onSubmit(e: FormEvent) {

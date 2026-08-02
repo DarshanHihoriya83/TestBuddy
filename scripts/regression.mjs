@@ -136,6 +136,10 @@ async function testBugs() {
   if (list.res.ok && Array.isArray(list.json)) pass("GET /api/bugs", `${list.json.length} bug(s)`);
   else fail("GET /api/bugs", list.text);
 
+  const shotId = crypto.randomUUID();
+  const tinyPng =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
   const body = {
     title: "Regression bug",
     description: "Automated regression test bug",
@@ -163,20 +167,42 @@ async function testBugs() {
         pageUrl: "https://example.com",
         description: "Clicked the 'Submit' button",
         expectedResult: "Form submits",
-        screenshotId: "shot-regression-1",
+        screenshotId: shotId,
+      },
+    ],
+    screenshots: [
+      {
+        id: shotId,
+        dataUrl: tinyPng,
+        overview: "Submit did nothing",
+        pageUrl: "https://example.com",
+        annotations: [{ type: "rect", x: 10, y: 10, w: 40, h: 20 }],
       },
     ],
   };
 
   const create = await api("/api/bugs", { method: "POST", body: JSON.stringify(body) });
-  if (create.res.status === 201 && create.json?.steps?.length === 2) {
+  if (
+    create.res.status === 201 &&
+    create.json?.steps?.length === 2 &&
+    create.json?.screenshots?.length === 1
+  ) {
     bugId = create.json.id;
-    pass("POST /api/bugs", `id=${bugId}`);
+    pass("POST /api/bugs", `id=${bugId} screenshots=1`);
   } else fail("POST /api/bugs", create.text);
 
   const get = await api(`/api/bugs/${bugId}`);
-  if (get.res.ok && get.json?.steps?.[1]?.screenshotId) pass("GET /api/bugs/:id");
+  if (get.res.ok && get.json?.steps?.[1]?.screenshotId === shotId) pass("GET /api/bugs/:id");
   else fail("GET /api/bugs/:id", get.text);
+
+  {
+    const res = await fetch(`${API}/api/screenshots/${shotId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const ct = res.headers.get("content-type") || "";
+    if (res.ok && ct.includes("image")) pass("GET /api/screenshots/:id");
+    else fail("GET /api/screenshots/:id", `${res.status} ${ct}`);
+  }
 
   const update = await api(`/api/bugs/${bugId}`, {
     method: "PUT",
@@ -249,12 +275,49 @@ async function testAuthGuards() {
 }
 
 async function testCleanup() {
-  const delBlocked = await api(`/api/projects/${createdProjectId}`, { method: "DELETE" });
-  if (delBlocked.res.status === 409) pass("DELETE /api/projects blocked when bugs exist");
-  else fail("DELETE /api/projects blocked when bugs exist", `status ${delBlocked.res.status}`);
+  // DELETE bug
+  if (bugId) {
+    const delBug = await api(`/api/bugs/${bugId}`, { method: "DELETE" });
+    if (delBug.res.status === 204) pass("DELETE /api/bugs/:id");
+    else fail("DELETE /api/bugs/:id", `status ${delBug.res.status}`);
+    const gone = await api(`/api/bugs/${bugId}`);
+    if (gone.res.status === 404) pass("Deleted bug returns 404");
+    else fail("Deleted bug returns 404", `status ${gone.res.status}`);
+  }
 
-  // delete bugs in project first (no delete bug API — update project only after bugs removed manually not available)
-  // Instead verify delete works on empty project
+  // Cascade: project with remaining bugs (if any) still deletes
+  const withBugs = await api("/api/projects", {
+    method: "POST",
+    body: JSON.stringify({ name: `Cascade ${Date.now()}` }),
+  });
+  const cascadeId = withBugs.json?.id;
+  if (cascadeId) {
+    const cycles = await api(`/api/cycles?projectId=${cascadeId}`);
+    const cycleId = cycles.json?.[0]?.id;
+    const users = await api("/api/users");
+    const assigneeId = users.json?.[0]?.id;
+    if (cycleId && assigneeId) {
+      await api("/api/bugs", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Cascade delete me",
+          description: "temp",
+          priority: "MEDIUM",
+          severity: "MINOR",
+          assigneeId,
+          cycleId,
+          projectId: cascadeId,
+          status: "NEW",
+          steps: [],
+        }),
+      });
+    }
+    const delCascade = await api(`/api/projects/${cascadeId}`, { method: "DELETE" });
+    if (delCascade.res.status === 204) pass("DELETE /api/projects cascades bugs");
+    else fail("DELETE /api/projects cascades bugs", `status ${delCascade.res.status}`);
+  }
+
+  // Empty project delete
   const empty = await api("/api/projects", {
     method: "POST",
     body: JSON.stringify({ name: `Empty ${Date.now()}` }),
@@ -264,6 +327,13 @@ async function testCleanup() {
     const del = await api(`/api/projects/${emptyId}`, { method: "DELETE" });
     if (del.res.status === 204) pass("DELETE /api/projects empty");
     else fail("DELETE /api/projects empty", `status ${del.res.status}`);
+  }
+
+  // Cleanup created project from earlier tests (may still have bugs)
+  if (createdProjectId) {
+    const delProj = await api(`/api/projects/${createdProjectId}`, { method: "DELETE" });
+    if (delProj.res.status === 204) pass("DELETE /api/projects cleanup");
+    else fail("DELETE /api/projects cleanup", `status ${delProj.res.status}`);
   }
 }
 

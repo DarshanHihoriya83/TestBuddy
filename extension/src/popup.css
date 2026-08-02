@@ -366,6 +366,48 @@ button.linkish {
   white-space: nowrap;
 }
 
+.live-bug-tag {
+  margin-left: auto;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9b1c1c;
+  background: #fee2e2;
+  border-radius: 999px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
+.live-desc strong,
+.live-actual strong,
+.live-expected strong {
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+.live-actual {
+  color: var(--ink);
+  line-height: 1.35;
+  margin-top: 2px;
+}
+
+.live-actual strong {
+  color: var(--accent);
+}
+
+.live-expected {
+  color: #9b1c1c;
+  line-height: 1.35;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed #f0b4b4;
+}
+
+.live-expected strong {
+  color: #9b1c1c;
+}
+
 .live-desc {
   color: var(--ink);
   line-height: 1.35;

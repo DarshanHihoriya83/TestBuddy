@@ -11,4 +11,5 @@ export const config = {
     process.env.JWT_SECRET ||
     "testbuddy-dev-secret-change-me-32chars-minimum!",
   jwtExpirationMs: Number(process.env.JWT_EXPIRATION_MS || 86_400_000),
+  aiServiceUrl: process.env.AI_SERVICE_URL || "http://127.0.0.1:8001",
 };

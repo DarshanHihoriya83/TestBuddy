@@ -30,7 +30,15 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${apiBase}${path}`, { ...init, headers });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `${res.status} ${res.statusText}`);
+    let message = text || `${res.status} ${res.statusText}`;
+    try {
+      const body = JSON.parse(text) as { message?: string; detail?: string };
+      if (body.message) message = body.message;
+      else if (typeof body.detail === "string") message = body.detail;
+    } catch {
+      /* keep */
+    }
+    throw new Error(message);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -53,3 +61,23 @@ export const fetchCycles = (projectId: string) =>
   api<Cycle[]>(`/api/cycles?projectId=${projectId}`);
 export const createBug = (body: BugCreateRequest) =>
   api<Bug>("/api/bugs", { method: "POST", body: JSON.stringify(body) });
+
+export type BugPolishMode = "both" | "title" | "description";
+
+export interface BugPolishResult {
+  title: string;
+  description: string;
+  provider?: string;
+  ai?: boolean;
+  warning?: string | null;
+}
+
+export const polishBugWithAi = (body: {
+  title?: string;
+  description?: string;
+  mode?: BugPolishMode;
+}) =>
+  api<BugPolishResult>("/api/ai/bug/polish", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });

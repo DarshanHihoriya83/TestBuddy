@@ -1,23 +1,60 @@
-import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useState } from "react";
-import { exportBugJson, fetchBug, fetchCycles, fetchProjects, fetchUsers } from "../api";
+import { deleteBug, fetchBug, fetchCycles, fetchProjects, fetchUsers } from "../api";
+import { BugScreenshots, BugStepsTable } from "../components/BugFullCard";
+import { ExportFormatModal } from "../components/ExportFormatModal";
 import { Shell } from "../components/Shell";
+import { exportBug, type ExportFormat } from "../utils/bugExport";
 
-function downloadJson(filename: string, data: unknown) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+function formatWhen(iso: string) {
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+function statusTone(status: string) {
+  switch (status) {
+    case "FIXED":
+    case "VERIFIED":
+    case "CLOSED":
+      return "bg-[var(--success-soft)] text-[var(--success)]";
+    case "IN_PROGRESS":
+    case "OPEN":
+      return "bg-[var(--accent-soft)] text-[var(--accent)]";
+    case "REOPENED":
+      return "bg-[var(--danger-soft)] text-[var(--danger)]";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
+function priorityTone(priority: string) {
+  switch (priority) {
+    case "CRITICAL":
+      return "bg-[var(--danger-soft)] text-[var(--danger)]";
+    case "HIGH":
+      return "bg-orange-100 text-orange-800";
+    case "MEDIUM":
+      return "bg-amber-100 text-amber-800";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
 }
 
 export function BugDetailPage() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const queryClient = useQueryClient();
+  const fromProjectId = (location.state as { fromProjectId?: string } | null)?.fromProjectId;
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [exportError, setExportError] = useState(false);
+
   const bugQuery = useQuery({ queryKey: ["bug", id], queryFn: () => fetchBug(id), enabled: !!id });
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: fetchUsers });
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: fetchProjects });
@@ -28,31 +65,68 @@ export function BugDetailPage() {
     enabled: !!projectId,
   });
 
+  const deleteMutation = useMutation({
+    mutationFn: deleteBug,
+    onSuccess: async () => {
+      const projectBack = fromProjectId || bugQuery.data?.projectId;
+      await queryClient.invalidateQueries({ queryKey: ["bugs"] });
+      navigate(projectBack ? `/projects/${projectBack}` : "/bugs");
+    },
+    onError: (err: Error) => {
+      setExportError(true);
+      setExportMsg(err.message);
+    },
+  });
+
   const bug = bugQuery.data;
   const nameOf = (uid: string) => usersQuery.data?.find((u) => u.id === uid)?.name ?? uid.slice(0, 8);
   const cycleName = cyclesQuery.data?.find((c) => c.id === bug?.cycleId)?.name ?? "—";
   const projectName = projectsQuery.data?.find((p) => p.id === bug?.projectId)?.name ?? "—";
+  const backToProject = fromProjectId || bug?.projectId;
 
-  async function onExport() {
+  async function onExportFormat(format: ExportFormat) {
+    if (!bug) return;
+    setExportBusy(true);
     setExportMsg(null);
     setExportError(false);
     try {
-      const data = await exportBugJson(id);
-      downloadJson(`testbuddy-bug-${id}.json`, data);
-      setExportMsg("Exported JSON downloaded");
+      await exportBug(format, {
+        bug,
+        projectName,
+        cycleName,
+        assigneeName: nameOf(bug.assigneeId),
+        reporterName: nameOf(bug.reporterId),
+      });
+      const label = format === "excel" ? "Excel" : format.toUpperCase();
+      setExportMsg(`${label} downloaded — open it to review the full bug`);
+      setExportOpen(false);
     } catch (err) {
       setExportError(true);
       setExportMsg(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      setExportBusy(false);
     }
   }
 
-  const pageTitle = bug?.title ? (bug.title.length > 40 ? `${bug.title.slice(0, 40)}…` : bug.title) : "Bug detail";
+  const pageTitle = bug?.title
+    ? bug.title.length > 40
+      ? `${bug.title.slice(0, 40)}…`
+      : bug.title
+    : "Bug detail";
 
   return (
     <Shell title={pageTitle}>
-      <Link to="/bugs" className="tb-link text-sm">
-        ← Back to bugs
-      </Link>
+      <div className="flex flex-wrap gap-3 text-sm">
+        {backToProject ? (
+          <Link to={`/projects/${backToProject}`} className="tb-link">
+            ← Back to project
+          </Link>
+        ) : (
+          <Link to="/bugs" className="tb-link">
+            ← Back to bugs
+          </Link>
+        )}
+      </div>
 
       {bugQuery.isLoading && <p className="mt-4 text-sm text-[var(--muted)]">Loading…</p>}
       {bugQuery.error && (
@@ -60,75 +134,109 @@ export function BugDetailPage() {
       )}
 
       {bug && (
-        <article className="mt-4 space-y-6">
-          <header className="tb-card tb-card-accent p-6">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <span className="tb-badge">
-                {bug.status} · {bug.priority} · {bug.severity}
-              </span>
-              <button type="button" onClick={() => void onExport()} className="tb-btn-ghost text-xs">
-                Export JSON
-              </button>
-            </div>
-            {exportMsg && (
-              <p className={`mt-2 text-xs ${exportError ? "tb-alert-error" : "text-[var(--success)]"}`}>
-                {exportMsg}
+        <article className="mt-4 space-y-5">
+          <header className="tb-card tb-card-accent overflow-hidden">
+            <div className="space-y-4 p-6">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <span
+                    className={`rounded-md px-2 py-0.5 text-xs font-semibold ${statusTone(bug.status)}`}
+                  >
+                    {bug.status}
+                  </span>
+                  <span
+                    className={`rounded-md px-2 py-0.5 text-xs font-semibold ${priorityTone(bug.priority)}`}
+                  >
+                    {bug.priority}
+                  </span>
+                  <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                    {bug.severity}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExportOpen(true)}
+                    className="tb-btn-primary text-xs"
+                  >
+                    Export
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-red-200 px-2.5 py-1 text-xs text-[var(--danger)] hover:bg-[var(--danger-soft)]"
+                    disabled={deleteMutation.isPending}
+                    onClick={() => {
+                      if (window.confirm(`Delete bug "${bug.title}"?`)) {
+                        deleteMutation.mutate(id);
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+
+              {exportMsg && (
+                <p className={`text-xs ${exportError ? "tb-alert-error" : "text-[var(--success)]"}`}>
+                  {exportMsg}
+                </p>
+              )}
+
+              <h2 className="text-3xl font-bold tracking-tight text-[var(--ink)]">{bug.title}</h2>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--muted)]">
+                {bug.description}
               </p>
-            )}
-            <h2 className="mt-2 text-3xl font-bold tracking-tight text-[var(--ink)]">{bug.title}</h2>
-            <p className="mt-3 whitespace-pre-wrap text-[var(--muted)]">{bug.description}</p>
-            <dl className="mt-5 grid gap-3 text-sm md:grid-cols-4">
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Assignee</dt>
-                <dd className="mt-1 font-medium">{nameOf(bug.assigneeId)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Reporter</dt>
-                <dd className="mt-1 font-medium">{nameOf(bug.reporterId)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Project</dt>
-                <dd className="mt-1 font-medium">{projectName}</dd>
-              </div>
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Cycle</dt>
-                <dd className="mt-1 font-medium">{cycleName}</dd>
-              </div>
+            </div>
+
+            <dl className="grid gap-px border-t border-[var(--line)] bg-[var(--line)] sm:grid-cols-2 lg:grid-cols-5">
+              <MetaTile label="Assignee" value={nameOf(bug.assigneeId)} />
+              <MetaTile label="Reporter" value={nameOf(bug.reporterId)} />
+              <MetaTile label="Project" value={projectName} />
+              <MetaTile label="Cycle" value={cycleName} />
+              <MetaTile label="Filed" value={formatWhen(bug.createdAt)} />
             </dl>
           </header>
 
           <section className="tb-card p-6">
-            <h3 className="text-lg font-bold text-[var(--ink)]">Actual steps</h3>
-            {bug.steps.length === 0 ? (
-              <p className="mt-3 text-sm text-[var(--muted)]">No steps recorded yet.</p>
-            ) : (
-              <ol className="mt-4 space-y-3">
-                {bug.steps.map((step) => (
-                  <li
-                    key={`${step.order}-${step.description}`}
-                    className="rounded-xl border border-[var(--line)] bg-[var(--input-bg)] px-4 py-3"
-                  >
-                    <div className="flex items-center justify-between gap-2 text-xs uppercase tracking-wide text-[var(--muted)]">
-                      <span>
-                        Step {step.order}
-                        <span className="mx-1.5">·</span>
-                        {step.actionType}
-                      </span>
-                      <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-bold tracking-wide text-[var(--accent-hover)]">
-                        Actual step
-                      </span>
-                    </div>
-                    <p className="mt-1 font-medium">{step.description}</p>
-                  </li>
-                ))}
-              </ol>
-            )}
-            <p className="mt-4 text-xs text-[var(--muted)]">
-              Video / annotated screenshots arrive in Phase 2.
+            <h3 className="text-lg font-bold text-[var(--ink)]">Reproduction steps</h3>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Step + Actual Result on every row. Expected Result only on the defect step.
             </p>
+            <BugStepsTable bug={bug} />
+          </section>
+
+          <section className="tb-card p-6">
+            <h3 className="text-lg font-bold text-[var(--ink)]">
+              Screenshots ({bug.screenshots?.length ?? 0})
+            </h3>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Captured and highlighted from the TestBuddy extension.
+            </p>
+            <BugScreenshots screenshots={bug.screenshots} />
           </section>
         </article>
       )}
+
+      <ExportFormatModal
+        open={exportOpen}
+        busy={exportBusy}
+        bugTitle={bug?.title ?? "Bug"}
+        onClose={() => {
+          if (!exportBusy) setExportOpen(false);
+        }}
+        onSelect={(format) => void onExportFormat(format)}
+      />
     </Shell>
+  );
+}
+
+function MetaTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-[var(--panel)] px-4 py-3">
+      <dt className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+        {label}
+      </dt>
+      <dd className="mt-1 text-sm font-medium text-[var(--ink)]">{value}</dd>
+    </div>
   );
 }

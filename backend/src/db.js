@@ -86,8 +86,55 @@ export async function ensureSchema() {
       value_entered VARCHAR(255),
       page_url VARCHAR(255) NOT NULL,
       description VARCHAR(2000) NOT NULL,
+      actual_result VARCHAR(2000),
       expected_result VARCHAR(2000),
       screenshot_id VARCHAR(255)
     );
+
+    CREATE TABLE IF NOT EXISTS screenshots (
+      id UUID PRIMARY KEY,
+      bug_id UUID NOT NULL REFERENCES bugs(id) ON DELETE CASCADE,
+      overview VARCHAR(2000),
+      page_url VARCHAR(2000),
+      content_type VARCHAR(100) NOT NULL,
+      storage_path VARCHAR(500) NOT NULL,
+      annotations JSONB,
+      created_at TIMESTAMPTZ NOT NULL
+    );
+  `);
+
+  // Existing DBs created before actual_result
+  await query(`
+    ALTER TABLE bug_steps
+    ADD COLUMN IF NOT EXISTS actual_result VARCHAR(2000)
+  `);
+
+  // Ensure bug_steps → bugs deletes cascade (older Hibernate FKs were RESTRICT)
+  await query(`
+    DO $$
+    DECLARE
+      r RECORD;
+    BEGIN
+      FOR r IN
+        SELECT con.conname
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+        WHERE nsp.nspname = 'public'
+          AND rel.relname = 'bug_steps'
+          AND con.contype = 'f'
+          AND con.confrelid = 'bugs'::regclass
+      LOOP
+        EXECUTE format('ALTER TABLE bug_steps DROP CONSTRAINT %I', r.conname);
+      END LOOP;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'bug_steps_bug_id_fkey'
+      ) THEN
+        ALTER TABLE bug_steps
+          ADD CONSTRAINT bug_steps_bug_id_fkey
+          FOREIGN KEY (bug_id) REFERENCES bugs(id) ON DELETE CASCADE;
+      END IF;
+    END $$;
   `);
 }

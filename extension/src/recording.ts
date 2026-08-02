@@ -1,7 +1,7 @@
 import type { BugPriority, BugSeverity, Step } from "./types";
-import type { CapturedScreenshot, RectAnnotation } from "./content/bugCapture";
+import type { Annotation, CapturedScreenshot, RectAnnotation } from "./content/bugCapture";
 
-export type { CapturedScreenshot, RectAnnotation };
+export type { Annotation, CapturedScreenshot, RectAnnotation };
 
 export type RecordingStatus = "idle" | "recording" | "paused" | "stopped";
 
@@ -52,7 +52,7 @@ export type ExtensionMessage =
       overview: string;
       dataUrl: string;
       pageUrl: string;
-      annotations: RectAnnotation[];
+      annotations: Annotation[];
     };
 
 export type ExtensionResponse =

@@ -48,9 +48,14 @@ export interface Step {
   selector: string;
   valueEntered?: string;
   pageUrl: string;
-  /** What actually happened (bug repro). Past-tense action text. */
+  /** Steps column — action the tester performed */
   description: string;
-  /** Test-case only — do not set on bug steps. */
+  /** Actual Result column — outcome of this step (filled for every step) */
+  actualResult?: string;
+  /**
+   * Expected Result column — ONLY on the step where the bug is found
+   * (e.g. screenshot defect). Leave blank on all other steps.
+   */
   expectedResult?: string;
   screenshotId?: string;
 }
@@ -67,6 +72,13 @@ export interface Bug {
   projectId: string;
   status: BugStatus;
   steps: Step[];
+  screenshots?: {
+    id: string;
+    overview: string;
+    pageUrl: string;
+    url: string;
+    createdAt: string;
+  }[];
   externalRefs?: { jiraIssueKey?: string; adoWorkItemId?: string };
   createdAt: string;
   updatedAt: string;
@@ -82,4 +94,12 @@ export interface BugCreateRequest {
   projectId: string;
   status?: BugStatus;
   steps?: Step[];
+  screenshots?: {
+    id: string;
+    dataUrl: string;
+    overview: string;
+    pageUrl: string;
+    createdAt?: string;
+    annotations?: Array<Record<string, unknown> & { type: string }>;
+  }[];
 }

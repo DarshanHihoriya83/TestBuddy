@@ -1,7 +1,8 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useMemo, useRef, useState } from "react";
 import {
+  deleteBug,
   exportBugsJson,
   fetchBugs,
   fetchCycles,
@@ -71,6 +72,19 @@ export function BugsPage() {
   const bugsQuery = useQuery({
     queryKey: ["bugs", filters],
     queryFn: () => fetchBugs(filters),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteBug,
+    onSuccess: async () => {
+      setMessage("Bug deleted");
+      setError(null);
+      await queryClient.invalidateQueries({ queryKey: ["bugs"] });
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+      setMessage(null);
+    },
   });
 
   const userName = useMemo(() => {
@@ -234,7 +248,16 @@ export function BugsPage() {
 
       {bugsQuery.isLoading && <p className="text-sm text-[var(--muted)]">Loading bugs…</p>}
       {bugsQuery.error && (
-        <p className="tb-alert-error">{(bugsQuery.error as Error).message}</p>
+        <div className="tb-alert-error mb-4 flex flex-wrap items-center justify-between gap-3">
+          <span>{(bugsQuery.error as Error).message}</span>
+          <button
+            type="button"
+            className="tb-btn-ghost bg-white px-3 py-1 text-xs"
+            onClick={() => void bugsQuery.refetch()}
+          >
+            Retry
+          </button>
+        </div>
       )}
 
       <div className="tb-table-wrap">
@@ -247,12 +270,13 @@ export function BugsPage() {
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3">Assignee</th>
               <th className="px-4 py-3">Cycle</th>
+              <th className="px-4 py-3">Actions</th>
             </tr>
           </thead>
           <tbody>
             {bugsQuery.data?.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-[var(--muted)]">
+                <td colSpan={7} className="px-4 py-8 text-center text-[var(--muted)]">
                   No bugs yet. File one from the extension popup.
                 </td>
               </tr>
@@ -269,6 +293,20 @@ export function BugsPage() {
                 <td className="px-4 py-3">{bug.status}</td>
                 <td className="px-4 py-3">{userName(bug.assigneeId)}</td>
                 <td className="px-4 py-3">{cycleName(bug.cycleId)}</td>
+                <td className="px-4 py-3">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-red-900/50 px-2.5 py-1 text-xs text-[var(--danger)] hover:bg-[var(--danger-soft)]"
+                    disabled={deleteMutation.isPending}
+                    onClick={() => {
+                      if (window.confirm(`Delete bug "${bug.title}"?`)) {
+                        deleteMutation.mutate(bug.id);
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

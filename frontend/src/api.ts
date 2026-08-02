@@ -1,4 +1,5 @@
 import type { Bug, BugFilters, Cycle, Project, User } from "./types";
+import { forceLogout } from "./authEvents";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -15,6 +16,25 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { ...authHeaders(), ...init?.headers },
   });
+
+  if (res.status === 401) {
+    // Don't logout on failed login/register attempts
+    const isAuthAttempt =
+      path.includes("/api/auth/login") || path.includes("/api/auth/register");
+    if (!isAuthAttempt) {
+      forceLogout();
+    }
+    const text = await res.text();
+    let message = "Unauthorized — please sign in again";
+    try {
+      const body = JSON.parse(text) as { message?: string };
+      if (body.message) message = body.message;
+    } catch {
+      /* keep default */
+    }
+    throw new Error(message);
+  }
+
   if (!res.ok) {
     const text = await res.text();
     let message = text || `${res.status} ${res.statusText}`;
@@ -35,7 +55,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export async function login(email: string, password: string) {
   return api<{ token: string; user: User }>("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email: email.trim(), password }),
   });
 }
 
@@ -89,6 +109,9 @@ export const updateProject = (id: string, body: ProjectPayload) =>
 
 export const deleteProject = (id: string) =>
   api<void>(`/api/projects/${id}`, { method: "DELETE" });
+
+export const deleteBug = (id: string) =>
+  api<void>(`/api/bugs/${id}`, { method: "DELETE" });
 
 export const fetchCycles = (projectId: string) =>
   api<Cycle[]>(`/api/cycles?projectId=${encodeURIComponent(projectId)}`);

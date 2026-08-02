@@ -1,13 +1,60 @@
 import type { Step } from "../types";
-import { boldData } from "../stepText";
+import { boldData, buildExpectedForDefect } from "../stepText";
 
-export interface RectAnnotation {
-  type: "rect";
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
+export type Annotation =
+  | {
+      type: "rect";
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      color: string;
+      width: number;
+    }
+  | {
+      type: "highlight";
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      color: string;
+      width: number;
+    }
+  | {
+      type: "line";
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      color: string;
+      width: number;
+    }
+  | {
+      type: "arrow";
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      color: string;
+      width: number;
+    }
+  | {
+      type: "pen";
+      points: { x: number; y: number }[];
+      color: string;
+      width: number;
+    }
+  | {
+      type: "text";
+      x: number;
+      y: number;
+      text: string;
+      color: string;
+      size: number;
+    };
+
+/** @deprecated use Annotation — kept for older callsites */
+export type RectAnnotation = Extract<Annotation, { type: "rect" }>;
 
 export interface CapturedScreenshot {
   id: string;
@@ -15,10 +62,16 @@ export interface CapturedScreenshot {
   overview: string;
   pageUrl: string;
   createdAt: string;
-  annotations: RectAnnotation[];
+  annotations: Annotation[];
 }
 
-/** Turn a short bug overview into an actual observation step (not expected result). */
+/**
+ * Defect step from screenshot + overview.
+ * Spreadsheet style:
+ *  - Step: action
+ *  - Actual Result: what was observed (bug)
+ *  - Expected Result: only on this step (what should have happened)
+ */
 export function buildObservationFromOverview(args: {
   overview: string;
   pageUrl: string;
@@ -33,9 +86,11 @@ export function buildObservationFromOverview(args: {
     selector: "[data-testbuddy-highlight]",
     pageUrl: args.pageUrl,
     screenshotId: args.screenshotId,
-    description: overview
-      ? `Observed the defect on the highlighted area: ${boldData(overview)}`
-      : `Marked a defect on the highlighted screenshot region`,
+    description: `Inspected the highlighted region on the page and reviewed the defect`,
+    actualResult: overview
+      ? `Observed defect: ${boldData(overview)}`
+      : `Defect was marked on the highlighted screenshot region`,
+    expectedResult: buildExpectedForDefect(overview),
   };
 }
 

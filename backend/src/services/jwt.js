@@ -10,5 +10,7 @@ export function generateToken(userId, email) {
 
 export function userIdFromToken(token) {
   const payload = jwt.verify(token, config.jwtSecret);
-  return payload.sub;
+  const sub = payload.sub ?? payload.userId;
+  if (!sub) throw new Error("Token missing subject");
+  return String(sub);
 }
