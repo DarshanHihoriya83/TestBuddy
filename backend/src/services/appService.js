@@ -85,11 +85,30 @@ function toProjectDto(project) {
 }
 
 function toOrganizationDto(org) {
+  const maxProjects = Number(org.max_projects ?? org.maxProjects);
   return {
     id: org.id,
     name: org.name,
     createdAt: org.created_at ?? org.createdAt ?? null,
+    maxProjects:
+      Number.isFinite(maxProjects) && maxProjects >= 1
+        ? Math.floor(maxProjects)
+        : Math.max(1, Number(config.defaultOrgMaxProjects) || 10),
   };
+}
+
+/** Positive integer org project cap. */
+function parseOrgMaxProjects(value, { required = false } = {}) {
+  if (value === undefined || value === null || value === "") {
+    if (required) throw badRequest("maxProjects is required");
+    return Math.max(1, Number(config.defaultOrgMaxProjects) || 10);
+  }
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) {
+    throw badRequest("maxProjects must be a positive integer (minimum 1)");
+  }
+  if (n > 1000) throw badRequest("maxProjects cannot exceed 1000");
+  return n;
 }
 
 function toModuleDto(mod) {
@@ -838,15 +857,17 @@ export async function getOrganization(actor, id) {
   };
 }
 
-export async function createOrganization(actor, { name }) {
+export async function createOrganization(actor, { name, maxProjects }) {
   if (!canCreateOrganization(actor)) {
     throw forbidden("Only SuperAdmin can create organizations");
   }
   const orgName = assertAlphabeticalName(name, "Organization name");
+  const orgMax = parseOrgMaxProjects(maxProjects);
   const id = randomUUID();
   const { rows } = await query(
-    `INSERT INTO organizations (id, name, created_at) VALUES ($1, $2, NOW()) RETURNING *`,
-    [id, orgName],
+    `INSERT INTO organizations (id, name, max_projects, created_at)
+     VALUES ($1, $2, $3, NOW()) RETURNING *`,
+    [id, orgName, orgMax],
   );
   // SuperAdmin auto-joins
   await query(
@@ -857,15 +878,31 @@ export async function createOrganization(actor, { name }) {
   return enrichOrganization(rows[0]);
 }
 
-export async function updateOrganization(actor, id, { name }) {
+export async function updateOrganization(actor, id, { name, maxProjects }) {
   if (!canCreateOrganization(actor)) {
     throw forbidden("Only SuperAdmin can update organizations");
   }
-  await requireOrganization(id);
-  const orgName = assertAlphabeticalName(name, "Organization name");
+  const existing = await requireOrganization(id);
+  const patches = [];
+  const params = [];
+
+  if (name !== undefined) {
+    const orgName = assertAlphabeticalName(name, "Organization name");
+    params.push(orgName);
+    patches.push(`name = $${params.length}`);
+  }
+  if (maxProjects !== undefined) {
+    const orgMax = parseOrgMaxProjects(maxProjects, { required: true });
+    params.push(orgMax);
+    patches.push(`max_projects = $${params.length}`);
+  }
+  if (patches.length === 0) {
+    return enrichOrganization(existing);
+  }
+  params.push(id);
   const { rows } = await query(
-    `UPDATE organizations SET name = $1 WHERE id = $2 RETURNING *`,
-    [orgName, id],
+    `UPDATE organizations SET ${patches.join(", ")} WHERE id = $${params.length} RETURNING *`,
+    params,
   );
   return enrichOrganization(rows[0]);
 }
@@ -999,9 +1036,24 @@ export async function createProject(actor, { name, organizationId, description, 
     throw forbidden("Only Manager or SuperAdmin can create projects");
   }
   if (!organizationId) throw badRequest("organizationId is required");
-  await requireOrganization(organizationId);
+  const org = await requireOrganization(organizationId);
   if (!isSuperAdmin(actor) && !(await isOrgMember(organizationId, actor.id))) {
     throw forbidden("You must be a member of the organization to create a project");
+  }
+
+  // Org-level cap: SuperAdmin may exceed; Managers cannot.
+  if (!isSuperAdmin(actor)) {
+    const orgMax = toOrganizationDto(org).maxProjects;
+    const { rows: orgCountRows } = await query(
+      `SELECT COUNT(*)::int AS c FROM projects WHERE organization_id = $1`,
+      [organizationId],
+    );
+    const orgUsed = orgCountRows[0]?.c ?? 0;
+    if (orgUsed >= orgMax) {
+      throw badRequest(
+        `Organization project limit reached: this organization allows at most ${orgMax} projects (currently ${orgUsed}). Ask a SuperAdmin to raise the limit.`,
+      );
+    }
   }
 
   if (isManager(actor)) {

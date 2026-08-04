@@ -47,6 +47,8 @@ export interface Organization {
   id: string;
   name: string;
   createdAt?: string;
+  /** Max projects allowed in this org (Managers enforced; SuperAdmin may exceed). */
+  maxProjects: number;
   projectCount?: number;
   memberCount?: number;
   projects?: Project[];

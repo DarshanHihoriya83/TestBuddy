@@ -396,12 +396,17 @@ export function ProjectsPage() {
   }, [orgs]);
 
   const defaultOrgId = organizationId || orgs[0]?.id || "";
+  const selectedOrg = orgs.find((o) => o.id === defaultOrgId) ?? orgs[0];
+  const orgUsed = selectedOrg?.projectCount ?? 0;
+  const orgCap = selectedOrg?.maxProjects;
+  const orgAtLimit = typeof orgCap === "number" && orgUsed >= orgCap;
   const quota = quotaQuery.data;
-  const atLimit =
+  const personalAtLimit =
     isManager(user) &&
     quota?.limit != null &&
     typeof quota.remaining === "number" &&
     quota.remaining <= 0;
+  const atLimit = personalAtLimit || (isManager(user) && orgAtLimit);
 
   useEffect(() => {
     const fromQuery = searchParams.get("organizationId")?.trim();
@@ -498,7 +503,11 @@ export function ProjectsPage() {
   function submitCreate(e: FormEvent) {
     e.preventDefault();
     if (atLimit) {
-      notifyError(`Project limit reached: Managers can create at most ${quota?.limit} projects.`);
+      notifyError(
+        orgAtLimit
+          ? `Organization project limit reached: this organization allows at most ${orgCap} projects.`
+          : `Project limit reached: Managers can create at most ${quota?.limit} projects.`,
+      );
       return;
     }
     const normalized = normalizeProjectName(name);
@@ -648,16 +657,20 @@ export function ProjectsPage() {
                 <h2 id="create-project-title" className="text-lg font-semibold text-[var(--ink)]">
                   Create project
                 </h2>
-                {isManager(user) && quota?.limit != null && (
-                  <p
-                    className={`mt-1 text-xs font-medium ${
-                      atLimit ? "text-[var(--danger)]" : "text-[var(--muted)]"
-                    }`}
-                  >
-                    Your quota: {quota.used}/{quota.limit} projects
-                    {typeof quota.remaining === "number" ? ` ? ${quota.remaining} left` : ""}
-                  </p>
-                )}
+                <div className="mt-1 space-y-0.5 text-xs font-medium">
+                  {selectedOrg && typeof orgCap === "number" && (
+                    <p className={orgAtLimit ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
+                      Org quota: {orgUsed}/{orgCap} projects
+                      {orgAtLimit ? " · full" : ` · ${Math.max(0, orgCap - orgUsed)} left`}
+                    </p>
+                  )}
+                  {isManager(user) && quota?.limit != null && (
+                    <p className={personalAtLimit ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
+                      Your quota: {quota.used}/{quota.limit} projects
+                      {typeof quota.remaining === "number" ? ` · ${quota.remaining} left` : ""}
+                    </p>
+                  )}
+                </div>
               </div>
               <button
                 type="button"
@@ -665,13 +678,14 @@ export function ProjectsPage() {
                 aria-label="Close"
                 onClick={() => setCreateOpen(false)}
               >
-                ?
+                ×
               </button>
             </div>
             {atLimit && (
               <p className="mt-2 text-sm text-[var(--danger)]">
-                You have reached the maximum number of projects you can create. Delete an existing
-                project or ask a SuperAdmin for help.
+                {orgAtLimit
+                  ? "This organization has reached its project limit. Ask a SuperAdmin to raise the limit."
+                  : "You have reached the maximum number of projects you can create. Delete an existing project or ask a SuperAdmin for help."}
               </p>
             )}
             <form className="mt-4" onSubmit={submitCreate}>
@@ -683,14 +697,20 @@ export function ProjectsPage() {
                     value={defaultOrgId}
                     onChange={(e) => setOrganizationId(e.target.value)}
                     required
-                    disabled={atLimit}
+                    disabled={personalAtLimit}
                   >
                     {orgs.length === 0 && <option value="">No organizations</option>}
-                    {orgs.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.name}
-                      </option>
-                    ))}
+                    {orgs.map((o) => {
+                      const used = o.projectCount ?? 0;
+                      const cap = o.maxProjects;
+                      const full = typeof cap === "number" && used >= cap;
+                      return (
+                        <option key={o.id} value={o.id}>
+                          {o.name}
+                          {typeof cap === "number" ? ` (${used}/${cap}${full ? " full" : ""})` : ""}
+                        </option>
+                      );
+                    })}
                   </select>
                 </label>
                 <label className="tb-label">
@@ -721,7 +741,7 @@ export function ProjectsPage() {
                   />
                   <span className="mt-1 flex justify-between gap-2 text-[11px] font-normal normal-case tracking-normal">
                     <span className={nameHint ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
-                      {nameHint || "Alphabetical characters only ? max 100 characters"}
+                      {nameHint || "Alphabetical characters only · max 100 characters"}
                     </span>
                     <span className="shrink-0 text-[var(--muted)]">
                       {normalizeProjectName(name).length}/{PROJECT_NAME_MAX_LENGTH}
@@ -816,7 +836,7 @@ export function ProjectsPage() {
                 aria-label="Close"
                 onClick={() => setEditProject(null)}
               >
-                ?
+                ×
               </button>
             </div>
             <form className="mt-4" onSubmit={submitEdit}>
@@ -950,7 +970,7 @@ export function ProjectsPage() {
         isLoading={projectsQuery.isLoading}
         error={projectsQuery.error}
         onRetry={() => void projectsQuery.refetch()}
-        loadingText="Loading projects?"
+        loadingText="Loading projects…"
       />
 
       {!projectsQuery.isLoading && !projectsQuery.error && (
@@ -1121,12 +1141,12 @@ export function ProjectsPage() {
                 aria-label="Previous page"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
               >
-                ?
+                ‹
               </button>
               {pageNumbers(safePage, totalPages).map((p, i) =>
                 p === "?" ? (
                   <span key={`e-${i}`} className="px-1 text-sm text-[var(--muted)]">
-                    ?
+                    …
                   </span>
                 ) : (
                   <button
@@ -1146,7 +1166,7 @@ export function ProjectsPage() {
                 aria-label="Next page"
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               >
-                ?
+                ›
               </button>
             </div>
             <div className="inline-flex items-center gap-2 text-sm text-[var(--muted)]">

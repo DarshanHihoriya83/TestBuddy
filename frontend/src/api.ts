@@ -213,14 +213,17 @@ export const fetchOrganizations = () => api<Organization[]>("/api/organizations"
 export const fetchOrganization = (id: string) =>
   api<Organization>(`/api/organizations/${id}`);
 
-export function createOrganization(body: { name: string }) {
+export function createOrganization(body: { name: string; maxProjects?: number }) {
   return api<Organization>("/api/organizations", {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
-export function updateOrganization(id: string, body: { name: string }) {
+export function updateOrganization(
+  id: string,
+  body: { name?: string; maxProjects?: number },
+) {
   return api<Organization>(`/api/organizations/${id}`, {
     method: "PUT",
     body: JSON.stringify(body),

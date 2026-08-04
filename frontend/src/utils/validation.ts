@@ -42,6 +42,22 @@ export function normalizeOrganizationName(name: string): string {
   return normalizeAlphabeticalName(name);
 }
 
+/** Org project create limit (SuperAdmin). */
+export const ORG_MAX_PROJECTS_CEILING = 1000;
+export const ORG_MAX_PROJECTS_DEFAULT = 10;
+
+export function validateOrgMaxProjects(value: string | number): string | null {
+  const raw = typeof value === "number" ? String(value) : value.trim();
+  if (!raw) return "Project limit is required";
+  if (!/^\d+$/.test(raw)) return "Project limit must be a whole number";
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) return "Project limit must be at least 1";
+  if (n > ORG_MAX_PROJECTS_CEILING) {
+    return `Project limit cannot exceed ${ORG_MAX_PROJECTS_CEILING}`;
+  }
+  return null;
+}
+
 /**
  * Project name: trim, letters + spaces only, max 100.
  */

@@ -17,6 +17,8 @@ import { canCreateOrganization } from "../utils/roles";
 import {
   ALPHA_NAME_MAX_LENGTH,
   normalizeOrganizationName,
+  ORG_MAX_PROJECTS_DEFAULT,
+  validateOrgMaxProjects,
   validateOrganizationName,
 } from "../utils/validation";
 
@@ -30,6 +32,8 @@ export function OrganizationsPage() {
   });
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [name, setName] = useState("");
+  const [maxProjects, setMaxProjects] = useState(String(ORG_MAX_PROJECTS_DEFAULT));
+  const [maxProjectsHint, setMaxProjectsHint] = useState<string | null>(null);
   const [nameHint, setNameHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -39,6 +43,8 @@ export function OrganizationsPage() {
     mutationFn: createOrganization,
     onSuccess: async (org) => {
       setName("");
+      setMaxProjects(String(ORG_MAX_PROJECTS_DEFAULT));
+      setMaxProjectsHint(null);
       setNameHint(null);
       setShowCreateForm(false);
       setMessage(`Organization "${org.name}" created successfully.`);
@@ -89,24 +95,40 @@ export function OrganizationsPage() {
     setNameHint(normalized ? validateOrganizationName(normalized) : null);
   }
 
+  function onMaxProjectsChange(raw: string) {
+    const digits = raw.replace(/\D/g, "").slice(0, 4);
+    setMaxProjects(digits);
+    if (error) setError(null);
+    setMaxProjectsHint(digits ? validateOrgMaxProjects(digits) : null);
+  }
+
   function onCreate(e: FormEvent) {
     e.preventDefault();
     const normalized = normalizeOrganizationName(name);
     setName(normalized);
     const nameErr = validateOrganizationName(normalized);
+    const limitErr = validateOrgMaxProjects(maxProjects);
     if (nameErr) {
       setNameHint(nameErr);
       setError(nameErr);
       setMessage(null);
       return;
     }
+    if (limitErr) {
+      setMaxProjectsHint(limitErr);
+      setError(limitErr);
+      setMessage(null);
+      return;
+    }
     setError(null);
-    createMutation.mutate({ name: normalized });
+    createMutation.mutate({ name: normalized, maxProjects: Number(maxProjects) });
   }
 
   function openCreateForm() {
     setShowCreateForm(true);
     setName("");
+    setMaxProjects(String(ORG_MAX_PROJECTS_DEFAULT));
+    setMaxProjectsHint(null);
     setNameHint(null);
     setError(null);
     setMessage(null);
@@ -115,12 +137,15 @@ export function OrganizationsPage() {
   function cancelCreateForm() {
     setShowCreateForm(false);
     setName("");
+    setMaxProjects(String(ORG_MAX_PROJECTS_DEFAULT));
+    setMaxProjectsHint(null);
     setNameHint(null);
     setError(null);
   }
 
   const orgs = orgsQuery.data ?? [];
   const nameInvalid = !!validateOrganizationName(name);
+  const limitInvalid = !!validateOrgMaxProjects(maxProjects);
 
   return (
     <Shell title="Organizations">
@@ -190,11 +215,42 @@ export function OrganizationsPage() {
             </span>
           </label>
 
+          <label className="tb-label max-w-xs">
+            Project limit *
+            <input
+              className={`tb-input ${maxProjectsHint ? "border-[var(--danger)] focus:border-[var(--danger)]" : ""}`}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={1000}
+              value={maxProjects}
+              onChange={(e) => onMaxProjectsChange(e.target.value)}
+              onBlur={() => setMaxProjectsHint(validateOrgMaxProjects(maxProjects))}
+              required
+              aria-invalid={!!maxProjectsHint}
+              aria-describedby="org-max-projects-hint"
+            />
+            <span
+              id="org-max-projects-hint"
+              className={`mt-1.5 text-[11px] font-normal normal-case tracking-normal ${
+                maxProjectsHint ? "text-[var(--danger)]" : "text-[var(--muted)]"
+              }`}
+            >
+              {maxProjectsHint ||
+                "Managers can create at most this many projects in the organization."}
+            </span>
+          </label>
+
           <div className="flex flex-wrap gap-2">
             <button
               type="submit"
               className="tb-btn-primary"
-              disabled={createMutation.isPending || !normalizeOrganizationName(name) || nameInvalid}
+              disabled={
+                createMutation.isPending ||
+                !normalizeOrganizationName(name) ||
+                nameInvalid ||
+                limitInvalid
+              }
             >
               {createMutation.isPending ? "Creating…" : "Create organization"}
             </button>
@@ -252,6 +308,9 @@ export function OrganizationsPage() {
                   </dt>
                   <dd className="mt-0.5 text-lg font-bold text-[var(--ink)]">
                     {org.projectCount ?? 0}
+                    <span className="text-sm font-semibold text-[var(--muted)]">
+                      /{org.maxProjects ?? "—"}
+                    </span>
                   </dd>
                 </div>
                 <div className="rounded-xl bg-[var(--panel-elevated)] px-3 py-2">

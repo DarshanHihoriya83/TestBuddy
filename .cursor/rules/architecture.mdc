@@ -47,7 +47,7 @@ Frontend dashboard ──► same Node Backend
 Mirror these in the Node backend (DB rows / mappers) and as TypeScript interfaces (frontend + extension):
 
 - `User` — roles: SUPERADMIN | MANAGER | DEVELOPER | TESTER
-- `Organization` — name; members via `organization_members`
+- `Organization` — name; optional maxProjects (org project create cap); members via `organization_members`
 - `Project` — organizationId required; optional jiraProjectKey, adoOrgUrl, adoProject
 - `Module` — projectId, name (feature area for bugs)
 - `Cycle` — projectId, name, isDefault (dropdown defaults to Cycle 1)
@@ -62,7 +62,7 @@ Mirror these in the Node backend (DB rows / mappers) and as TypeScript interface
 - **Extension login / create-bug UI:** TESTER only
 - **Organizations:** SuperAdmin create/manage; members see their orgs
 - **Org members:** SuperAdmin | Manager
-- **Projects:** SuperAdmin | Manager create (must belong to org); Manager capped by `MAX_PROJECTS_PER_MANAGER` (default 10)
+- **Projects:** SuperAdmin | Manager create (must belong to org); Manager capped by org `maxProjects` (SuperAdmin sets per org) and by `MAX_PROJECTS_PER_MANAGER` (default 10, lifetime by created_by)
 - **Project visibility:** Manager sees all projects in their org(s); Developer/Tester only projects where added to `project_members` (Manager must grant access)
 - **Project members:** SuperAdmin | Manager add/remove; target user must be an org member first
 - **Modules / create bug:** includes Tester (on accessible projects only)

@@ -25,6 +25,7 @@ import {
 import {
   ALPHA_NAME_MAX_LENGTH,
   normalizeOrganizationName,
+  validateOrgMaxProjects,
   validateOrganizationName,
 } from "../utils/validation";
 
@@ -41,6 +42,9 @@ export function OrganizationDetailPage() {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [nameHint, setNameHint] = useState<string | null>(null);
+  const [editingLimit, setEditingLimit] = useState(false);
+  const [limitDraft, setLimitDraft] = useState("");
+  const [limitHint, setLimitHint] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<{ id: string; name: string } | null>(null);
   const [projectSearch, setProjectSearch] = useState("");
 
@@ -72,6 +76,12 @@ export function OrganizationDetailPage() {
       setNameDraft(orgQuery.data.name);
     }
   }, [orgQuery.data?.name, editingName]);
+
+  useEffect(() => {
+    if (orgQuery.data?.maxProjects != null && !editingLimit) {
+      setLimitDraft(String(orgQuery.data.maxProjects));
+    }
+  }, [orgQuery.data?.maxProjects, editingLimit]);
 
   const addMutation = useMutation({
     mutationFn: (userId: string) => addOrganizationMember(id, userId),
@@ -122,6 +132,22 @@ export function OrganizationDetailPage() {
     },
   });
 
+  const limitMutation = useMutation({
+    mutationFn: (maxProjects: number) => updateOrganization(id, { maxProjects }),
+    onSuccess: async (org) => {
+      setEditingLimit(false);
+      setLimitHint(null);
+      setMessage(`Project limit updated to ${org.maxProjects}.`);
+      setError(null);
+      await queryClient.invalidateQueries({ queryKey: ["organization", id] });
+      await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+      setMessage(null);
+    },
+  });
+
   const org = orgQuery.data;
   const projects = org?.projects ?? [];
   const filteredProjects = useMemo(() => {
@@ -139,6 +165,7 @@ export function OrganizationDetailPage() {
     setNameDraft(org?.name ?? "");
     setNameHint(null);
     setEditingName(true);
+    setEditingLimit(false);
     setError(null);
   }
 
@@ -165,6 +192,42 @@ export function OrganizationDetailPage() {
     }
     renameMutation.mutate(normalized);
   }
+
+  function startEditLimit() {
+    setLimitDraft(String(org?.maxProjects ?? 10));
+    setLimitHint(null);
+    setEditingLimit(true);
+    setEditingName(false);
+    setError(null);
+  }
+
+  function cancelEditLimit() {
+    setEditingLimit(false);
+    setLimitDraft(String(org?.maxProjects ?? 10));
+    setLimitHint(null);
+  }
+
+  function onSaveLimit(e: FormEvent) {
+    e.preventDefault();
+    const limitErr = validateOrgMaxProjects(limitDraft);
+    if (limitErr) {
+      setLimitHint(limitErr);
+      setError(limitErr);
+      setMessage(null);
+      return;
+    }
+    const next = Number(limitDraft);
+    if (next === org?.maxProjects) {
+      setEditingLimit(false);
+      return;
+    }
+    limitMutation.mutate(next);
+  }
+
+  const projectUsed = org?.projectCount ?? projects.length;
+  const projectCap = org?.maxProjects;
+  const orgAtLimit =
+    typeof projectCap === "number" && projectUsed >= projectCap;
 
   return (
     <Shell title={org?.name ?? "Organization"}>
@@ -246,13 +309,64 @@ export function OrganizationDetailPage() {
                   </button>
                 </div>
               </form>
+            ) : editingLimit ? (
+              <form className="mt-3 max-w-xs space-y-3" onSubmit={onSaveLimit}>
+                <label className="tb-label">
+                  Project limit *
+                  <input
+                    className={`tb-input ${limitHint ? "border-[var(--danger)]" : ""}`}
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={1000}
+                    value={limitDraft}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, "").slice(0, 4);
+                      setLimitDraft(digits);
+                      setLimitHint(digits ? validateOrgMaxProjects(digits) : null);
+                    }}
+                    onBlur={() => setLimitHint(validateOrgMaxProjects(limitDraft))}
+                    required
+                    autoFocus
+                  />
+                  <span
+                    className={`mt-1.5 text-[11px] font-normal normal-case tracking-normal ${
+                      limitHint ? "text-[var(--danger)]" : "text-[var(--muted)]"
+                    }`}
+                  >
+                    {limitHint ||
+                      `Managers stop creating when the org reaches this cap (currently ${projectUsed} projects).`}
+                  </span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="submit"
+                    className="tb-btn-primary text-xs"
+                    disabled={limitMutation.isPending || !!validateOrgMaxProjects(limitDraft)}
+                  >
+                    {limitMutation.isPending ? "Saving…" : "Save limit"}
+                  </button>
+                  <button
+                    type="button"
+                    className="tb-btn-ghost text-xs"
+                    onClick={cancelEditLimit}
+                    disabled={limitMutation.isPending}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
             ) : (
               <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 className="text-3xl font-bold tracking-tight text-[var(--ink)]">{org.name}</h2>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <span className="inline-flex items-center rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-[var(--ink)] ring-1 ring-[var(--line)]">
-                      {org.projectCount ?? projects.length} projects
+                    <span
+                      className={`inline-flex items-center rounded-lg bg-white px-2.5 py-1 text-xs font-semibold ring-1 ring-[var(--line)] ${
+                        orgAtLimit ? "text-[var(--danger)]" : "text-[var(--ink)]"
+                      }`}
+                    >
+                      {projectUsed}/{projectCap ?? "—"} projects
                     </span>
                     <span className="inline-flex items-center rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-[var(--ink)] ring-1 ring-[var(--line)]">
                       {org.memberCount ?? members.length} members
@@ -260,9 +374,14 @@ export function OrganizationDetailPage() {
                   </div>
                 </div>
                 {canEditOrg && (
-                  <button type="button" className="tb-btn-ghost text-xs" onClick={startRename}>
-                    Rename
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="tb-btn-ghost text-xs" onClick={startRename}>
+                      Rename
+                    </button>
+                    <button type="button" className="tb-btn-ghost text-xs" onClick={startEditLimit}>
+                      Edit project limit
+                    </button>
+                  </div>
                 )}
               </div>
             )}
@@ -293,12 +412,21 @@ export function OrganizationDetailPage() {
                   </Link>
                 )}
                 {canCreateProj && (
-                  <Link
-                    to={`/projects?organizationId=${encodeURIComponent(id)}`}
-                    className="tb-btn-primary px-3 py-1.5 text-xs"
-                  >
-                    + Create project
-                  </Link>
+                  orgAtLimit ? (
+                    <span
+                      className="cursor-not-allowed rounded-lg bg-[var(--panel-elevated)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)] ring-1 ring-[var(--line)]"
+                      title="Organization project limit reached"
+                    >
+                      Limit reached
+                    </span>
+                  ) : (
+                    <Link
+                      to={`/projects?organizationId=${encodeURIComponent(id)}`}
+                      className="tb-btn-primary px-3 py-1.5 text-xs"
+                    >
+                      + Create project
+                    </Link>
+                  )
                 )}
               </div>
             </div>

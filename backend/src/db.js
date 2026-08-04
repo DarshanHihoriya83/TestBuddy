@@ -275,6 +275,15 @@ export async function ensureSchema() {
     END $$;
   `);
 
+  // Per-organization project create cap (SuperAdmin sets; Managers enforced).
+  await query(`
+    ALTER TABLE organizations
+    ADD COLUMN IF NOT EXISTS max_projects INTEGER NOT NULL DEFAULT 10
+  `);
+  await query(`
+    UPDATE organizations SET max_projects = 10 WHERE max_projects IS NULL OR max_projects < 1
+  `);
+
   // Track who created each project (Manager per-user create limit).
   await query(`
     ALTER TABLE projects

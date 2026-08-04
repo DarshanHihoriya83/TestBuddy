@@ -264,6 +264,17 @@ async function testCatalog() {
   let used = q.json?.used ?? 0;
   const quotaProjIds = [];
   if (typeof limit === "number" && limit > 0 && organizationId) {
+    // Raise org cap so personal MAX_PROJECTS_PER_MANAGER can be hit first
+    await loginAs("superadmin@testbuddy.local");
+    const raised = await api(`/api/organizations/${organizationId}`, {
+      method: "PUT",
+      body: JSON.stringify({ maxProjects: Math.max(limit + 20, 50) }),
+    });
+    if (!raised.res.ok) {
+      fail("Manager fill toward project quota", `could not raise org limit: ${raised.text}`);
+    }
+    await loginAs("carol@testbuddy.local");
+
     while (used < limit) {
       const fill = await api("/api/projects", {
         method: "POST",
@@ -278,6 +289,9 @@ async function testCatalog() {
       }
       quotaProjIds.push(fill.json.id);
       used += 1;
+    }
+    if (quotaProjIds.length > 0 || used >= limit) {
+      pass("Manager fill toward project quota", `filled to ${used}/${limit}`);
     }
     const blocked = await api("/api/projects", {
       method: "POST",
@@ -314,6 +328,103 @@ async function testOrgRbac() {
   if (orgCreate.res.status === 201 && regOrgId) {
     pass("POST /api/organizations (SuperAdmin)", orgCreate.json.name);
   } else fail("POST /api/organizations (SuperAdmin)", orgCreate.text);
+
+  // Org project limit: SuperAdmin sets maxProjects; Manager cannot exceed
+  const limitOrg = await api("/api/organizations", {
+    method: "POST",
+    body: JSON.stringify({ name: uniqueAlphaName("LimitOrg"), maxProjects: 2 }),
+  });
+  const limitOrgId = limitOrg.json?.id;
+  if (
+    limitOrg.res.status === 201 &&
+    limitOrgId &&
+    limitOrg.json?.maxProjects === 2
+  ) {
+    pass("POST /api/organizations with maxProjects=2", limitOrg.json.name);
+  } else {
+    fail("POST /api/organizations with maxProjects=2", limitOrg.text);
+  }
+
+  if (limitOrgId) {
+    const bumpLimit = await api(`/api/organizations/${limitOrgId}`, {
+      method: "PUT",
+      body: JSON.stringify({ maxProjects: 1 }),
+    });
+    if (bumpLimit.res.ok && bumpLimit.json?.maxProjects === 1) {
+      pass("PUT /api/organizations maxProjects=1");
+    } else fail("PUT /api/organizations maxProjects=1", bumpLimit.text);
+
+    const carolLoginForLimit = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "carol@testbuddy.local", password: "password" }),
+    });
+    const carolLimitId = carolLoginForLimit.json?.user?.id;
+    if (carolLimitId) {
+      await api(`/api/organizations/${limitOrgId}/members`, {
+        method: "POST",
+        body: JSON.stringify({ userId: carolLimitId }),
+      });
+    }
+
+    await loginAs("carol@testbuddy.local");
+    const firstInLimit = await api("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({
+        name: uniqueProjectName("LimOne"),
+        organizationId: limitOrgId,
+      }),
+    });
+    const firstLimId = firstInLimit.json?.id;
+    if (firstInLimit.res.status === 201 && firstLimId) {
+      pass("Manager creates first project under org limit");
+    } else fail("Manager creates first project under org limit", firstInLimit.text);
+
+    const secondBlocked = await api("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({
+        name: uniqueProjectName("LimTwo"),
+        organizationId: limitOrgId,
+      }),
+    });
+    if (
+      secondBlocked.res.status === 400 &&
+      /organization project limit/i.test(secondBlocked.text || "")
+    ) {
+      pass("Manager blocked by organization project limit");
+    } else {
+      fail(
+        "Manager blocked by organization project limit",
+        `status ${secondBlocked.res.status} ${secondBlocked.text}`,
+      );
+    }
+
+    await loginAs("superadmin@testbuddy.local");
+    const saBeyond = await api("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({
+        name: uniqueProjectName("SaBeyond"),
+        organizationId: limitOrgId,
+      }),
+    });
+    const saBeyondId = saBeyond.json?.id;
+    if (saBeyond.res.status === 201 && saBeyondId) {
+      pass("SuperAdmin can exceed organization project limit");
+    } else fail("SuperAdmin can exceed organization project limit", saBeyond.text);
+
+    const raiseLimit = await api(`/api/organizations/${limitOrgId}`, {
+      method: "PUT",
+      body: JSON.stringify({ maxProjects: 5 }),
+    });
+    if (raiseLimit.res.ok && raiseLimit.json?.maxProjects === 5) {
+      pass("PUT /api/organizations raise maxProjects");
+    } else fail("PUT /api/organizations raise maxProjects", raiseLimit.text);
+
+    // Cleanup limit-org projects (org delete later via cascade if we delete org)
+    for (const pid of [firstLimId, saBeyondId].filter(Boolean)) {
+      await api(`/api/projects/${pid}`, { method: "DELETE" });
+    }
+    await api(`/api/organizations/${limitOrgId}`, { method: "DELETE" });
+  }
 
   const badOrg = await api("/api/organizations", {
     method: "POST",
