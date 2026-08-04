@@ -1,5 +1,5 @@
 import browser from "webextension-polyfill";
-import type { Bug, BugCreateRequest, Cycle, Project, User } from "./types";
+import type { Bug, BugCreateRequest, Cycle, Module, Project, User } from "./types";
 
 const DEFAULT_API = "http://localhost:8080";
 
@@ -13,12 +13,21 @@ export async function getToken(): Promise<string | null> {
   return (stored.token as string) || null;
 }
 
-export async function setSession(token: string, apiBase: string) {
-  await browser.storage.local.set({ token, apiBase });
+export async function setSession(token: string, apiBase: string, user?: User) {
+  await browser.storage.local.set({
+    token,
+    apiBase,
+    ...(user ? { user } : {}),
+  });
 }
 
 export async function clearSession() {
-  await browser.storage.local.remove(["token"]);
+  await browser.storage.local.remove(["token", "user"]);
+}
+
+export async function getStoredUser(): Promise<User | null> {
+  const stored = await browser.storage.local.get(["user"]);
+  return (stored.user as User) || null;
 }
 
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -44,21 +53,44 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Extension is Tester-only — reject any other role. */
+export function assertExtensionTester(user: User | null | undefined): User {
+  if (!user || user.role !== "TESTER") {
+    throw new Error(
+      "Extension access is for Tester accounts only. Sign in with a Tester role.",
+    );
+  }
+  return user;
+}
+
 export function login(email: string, password: string, apiBase: string) {
   return fetch(`${apiBase}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   }).then(async (res) => {
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const text = await res.text();
+      let message = text || "Login failed";
+      try {
+        const body = JSON.parse(text) as { message?: string };
+        if (body.message) message = body.message;
+      } catch {
+        /* keep */
+      }
+      throw new Error(message);
+    }
     return res.json() as Promise<{ token: string; user: User }>;
   });
 }
 
+export const fetchMe = () => api<User>("/api/auth/me");
 export const fetchUsers = () => api<User[]>("/api/users");
 export const fetchProjects = () => api<Project[]>("/api/projects");
 export const fetchCycles = (projectId: string) =>
   api<Cycle[]>(`/api/cycles?projectId=${projectId}`);
+export const fetchModules = (projectId: string) =>
+  api<Module[]>(`/api/projects/${projectId}/modules`);
 export const createBug = (body: BugCreateRequest) =>
   api<Bug>("/api/bugs", { method: "POST", body: JSON.stringify(body) });
 
@@ -78,6 +110,42 @@ export const polishBugWithAi = (body: {
   mode?: BugPolishMode;
 }) =>
   api<BugPolishResult>("/api/ai/bug/polish", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export interface HumanizedStep {
+  order: number;
+  description: string;
+  actualResult: string;
+  expectedResult?: string;
+}
+
+export interface StepsHumanizeResult {
+  steps: HumanizedStep[];
+  provider?: string;
+  ai?: boolean;
+  warning?: string | null;
+}
+
+export const humanizeStepsWithAi = (body: {
+  title?: string;
+  description?: string;
+  steps: Array<{
+    order: number;
+    actionType?: string;
+    elementLabel?: string;
+    valueEntered?: string;
+    pageUrl?: string;
+    screenshotId?: string;
+    overview?: string;
+    description?: string;
+    actualResult?: string;
+    expectedResult?: string;
+    isDefect?: boolean;
+  }>;
+}) =>
+  api<StepsHumanizeResult>("/api/ai/steps/humanize", {
     method: "POST",
     body: JSON.stringify(body),
   });

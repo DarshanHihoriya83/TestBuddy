@@ -1,4 +1,4 @@
-export type UserRole = "ADMIN" | "TESTER" | "DEVELOPER" | "MANAGER";
+export type UserRole = "SUPERADMIN" | "ADMIN" | "TESTER" | "DEVELOPER" | "MANAGER";
 export type BugPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type BugSeverity = "MINOR" | "MAJOR" | "CRITICAL" | "BLOCKER";
 export type BugStatus =
@@ -22,14 +22,41 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  active?: boolean;
 }
 
 export interface Project {
   id: string;
   name: string;
+  organizationId?: string;
   jiraProjectKey?: string;
   adoOrgUrl?: string;
   adoProject?: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  createdAt?: string;
+  projectCount?: number;
+  memberCount?: number;
+  projects?: Project[];
+}
+
+export interface Module {
+  id: string;
+  projectId: string;
+  name: string;
+  createdAt?: string;
+}
+
+export interface BugComment {
+  id: string;
+  bugId: string;
+  authorId: string;
+  authorName?: string | null;
+  body: string;
+  createdAt: string;
 }
 
 export interface Cycle {
@@ -77,6 +104,7 @@ export interface Bug {
   reporterId: string;
   cycleId: string;
   projectId: string;
+  moduleId?: string | null;
   status: BugStatus;
   steps: Step[];
   screenshots?: BugScreenshot[];
@@ -92,4 +120,5 @@ export interface BugFilters {
   assigneeId?: string;
   cycleId?: string;
   status?: BugStatus | "";
+  moduleId?: string;
 }

@@ -1,47 +1,143 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { fetchBugs, fetchCycles, fetchProject, fetchUsers } from "../api";
-import { BugListRow } from "../components/BugListRow";
+import {
+  addProjectMember,
+  createModule,
+  deleteModule,
+  fetchCycles,
+  fetchModules,
+  fetchProject,
+  fetchProjectMembers,
+  fetchUsers,
+  removeProjectMember,
+  updateModule,
+} from "../api";
+import { useAuth } from "../auth";
+import { ProjectMembersPanel } from "../components/project/ProjectMembersPanel";
+import { ProjectModulesPanel } from "../components/project/ProjectModulesPanel";
+import { QueryStatus } from "../components/QueryStatus";
 import { Shell } from "../components/Shell";
+import { queryKeys } from "../queryKeys";
+import {
+  canCreateProject,
+  canManageModules,
+  canManageProjectMembers,
+  canTransferRoles,
+} from "../utils/roles";
 
 export function ProjectDetailPage() {
   const { id = "" } = useParams();
-  const [cycleFilter, setCycleFilter] = useState("");
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const canManage = canCreateProject(user);
+  const canMembers = canManageProjectMembers(user);
+  const canModules = canManageModules(user);
+  const isTester = user?.role === "TESTER";
+  const showMembersSection = !isTester;
+  const [addUserId, setAddUserId] = useState("");
+  const [memberMessage, setMemberMessage] = useState<string | null>(null);
+  const [memberError, setMemberError] = useState<string | null>(null);
+  const [moduleName, setModuleName] = useState("");
+  const [moduleError, setModuleError] = useState<string | null>(null);
 
   const projectQuery = useQuery({
-    queryKey: ["project", id],
+    queryKey: queryKeys.project(id),
     queryFn: () => fetchProject(id),
     enabled: !!id,
   });
   const cyclesQuery = useQuery({
-    queryKey: ["cycles", id],
+    queryKey: queryKeys.cycles(id),
     queryFn: () => fetchCycles(id),
     enabled: !!id,
   });
-  const bugsQuery = useQuery({
-    queryKey: ["bugs", { projectId: id }],
-    queryFn: () => fetchBugs({ projectId: id }),
+  const membersQuery = useQuery({
+    queryKey: queryKeys.projectMembers(id),
+    queryFn: () => fetchProjectMembers(id),
+    enabled: !!id && showMembersSection,
+  });
+  const modulesQuery = useQuery({
+    queryKey: queryKeys.modules(id),
+    queryFn: () => fetchModules(id),
     enabled: !!id,
   });
-  const usersQuery = useQuery({ queryKey: ["users"], queryFn: fetchUsers });
+  const usersQuery = useQuery({
+    queryKey: queryKeys.users(),
+    queryFn: () => fetchUsers(),
+    enabled: showMembersSection,
+  });
 
   const project = projectQuery.data;
-  const nameOf = (uid: string) =>
-    usersQuery.data?.find((u) => u.id === uid)?.name ?? uid.slice(0, 8);
-  const cycleName = (cycleId: string) =>
-    cyclesQuery.data?.find((c) => c.id === cycleId)?.name ?? cycleId.slice(0, 8);
-
-  const bugs = useMemo(() => {
-    const list = bugsQuery.data ?? [];
-    if (!cycleFilter) return list;
-    return list.filter((b) => b.cycleId === cycleFilter);
-  }, [bugsQuery.data, cycleFilter]);
-
-  const shotTotal = useMemo(
-    () => (bugsQuery.data ?? []).reduce((n, b) => n + (b.screenshots?.length ?? 0), 0),
-    [bugsQuery.data],
+  const members = membersQuery.data ?? [];
+  const memberIds = useMemo(() => new Set(members.map((m) => m.id)), [members]);
+  const addableUsers = useMemo(
+    () => (usersQuery.data ?? []).filter((u) => u.active !== false && !memberIds.has(u.id)),
+    [usersQuery.data, memberIds],
   );
+
+  const addMemberMutation = useMutation({
+    mutationFn: (userId: string) => addProjectMember(id, userId),
+    onSuccess: async () => {
+      setAddUserId("");
+      setMemberMessage("Member added");
+      setMemberError(null);
+      await queryClient.invalidateQueries({ queryKey: ["project-members"] });
+      await queryClient.invalidateQueries({ queryKey: ["project", id] });
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      await queryClient.invalidateQueries({ queryKey: ["users-admin"] });
+    },
+    onError: (err: Error) => {
+      setMemberError(err.message);
+      setMemberMessage(null);
+    },
+  });
+
+  const removeMemberMutation = useMutation({
+    mutationFn: (userId: string) => removeProjectMember(id, userId),
+    onSuccess: async () => {
+      setMemberMessage("Member removed");
+      setMemberError(null);
+      await queryClient.invalidateQueries({ queryKey: ["project-members"] });
+      await queryClient.invalidateQueries({ queryKey: ["project", id] });
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      await queryClient.invalidateQueries({ queryKey: ["users-admin"] });
+    },
+    onError: (err: Error) => {
+      setMemberError(err.message);
+      setMemberMessage(null);
+    },
+  });
+
+  const createModuleMutation = useMutation({
+    mutationFn: (name: string) => createModule(id, { name }),
+    onSuccess: async () => {
+      setModuleName("");
+      setModuleError(null);
+      await queryClient.invalidateQueries({ queryKey: ["modules", id] });
+      await queryClient.invalidateQueries({ queryKey: ["project", id] });
+    },
+    onError: (err: Error) => setModuleError(err.message),
+  });
+
+  const renameModuleMutation = useMutation({
+    mutationFn: ({ moduleId, name }: { moduleId: string; name: string }) =>
+      updateModule(moduleId, { name }),
+    onSuccess: async () => {
+      setModuleError(null);
+      await queryClient.invalidateQueries({ queryKey: ["modules", id] });
+    },
+    onError: (err: Error) => setModuleError(err.message),
+  });
+
+  const deleteModuleMutation = useMutation({
+    mutationFn: deleteModule,
+    onSuccess: async () => {
+      setModuleError(null);
+      await queryClient.invalidateQueries({ queryKey: ["modules", id] });
+      await queryClient.invalidateQueries({ queryKey: ["project", id] });
+    },
+    onError: (err: Error) => setModuleError(err.message),
+  });
 
   return (
     <Shell title="Project detail">
@@ -49,10 +145,13 @@ export function ProjectDetailPage() {
         ← Back to projects
       </Link>
 
-      {projectQuery.isLoading && <p className="mt-4 text-sm text-[var(--muted)]">Loading…</p>}
-      {projectQuery.error && (
-        <p className="tb-alert-error mt-4">{(projectQuery.error as Error).message}</p>
-      )}
+      <QueryStatus
+        isLoading={projectQuery.isLoading}
+        error={projectQuery.error}
+        onRetry={() => void projectQuery.refetch()}
+        loadingText="Loading…"
+        className="mt-4"
+      />
 
       {project && (
         <div className="mt-4 space-y-6">
@@ -65,120 +164,105 @@ export function ProjectDetailPage() {
                 <h2 className="mt-1 text-3xl font-bold tracking-tight text-[var(--ink)]">
                   {project.name}
                 </h2>
-                <p className="mt-2 font-mono text-xs text-[var(--muted)]">{project.id}</p>
+                {!isTester && (
+                  <p className="mt-2 font-mono text-xs text-[var(--muted)]">{project.id}</p>
+                )}
+                {isTester && (
+                  <p className="mt-2 text-sm text-[var(--muted)]">
+                    Open a module card to view and edit bugs in that module.
+                  </p>
+                )}
               </div>
-              <Link to={`/projects/${project.id}/edit`} className="tb-btn-primary text-sm">
-                Edit project
-              </Link>
+              <div className="flex flex-wrap gap-2">
+                {!isTester && (
+                  <Link to={`/bugs?projectId=${project.id}`} className="tb-btn-ghost text-sm">
+                    View bugs
+                  </Link>
+                )}
+                {canManage && (
+                  <Link to={`/projects/${project.id}/edit`} className="tb-btn-primary text-sm">
+                    Edit project
+                  </Link>
+                )}
+              </div>
             </div>
 
-            <div className="grid gap-px border-t border-[var(--line)] bg-[var(--line)] sm:grid-cols-2 lg:grid-cols-4">
-              <Stat label="Bugs" value={String(bugsQuery.data?.length ?? project.bugCount)} />
-              <Stat label="Cycles" value={String(project.cycleCount)} />
-              <Stat label="Screenshots" value={String(shotTotal)} />
-              <Stat
-                label="Integrations"
-                value={
-                  [project.jiraProjectKey && "Jira", project.adoProject && "ADO"]
-                    .filter(Boolean)
-                    .join(" · ") || "None"
-                }
-              />
-            </div>
+            {!isTester && (
+              <>
+                <div
+                  className={`grid gap-px border-t border-[var(--line)] bg-[var(--line)] sm:grid-cols-2 lg:grid-cols-3 ${
+                    showMembersSection ? "xl:grid-cols-5" : "xl:grid-cols-4"
+                  }`}
+                >
+                  <Stat label="Bugs" value={String(project.bugCount ?? 0)} />
+                  <Stat
+                    label="Cycles"
+                    value={String(cyclesQuery.data?.length ?? project.cycleCount ?? 0)}
+                  />
+                  <Stat
+                    label="Modules"
+                    value={String(modulesQuery.data?.length ?? project.moduleCount ?? 0)}
+                  />
+                  {showMembersSection ? (
+                    <Stat
+                      label="Members"
+                      value={String(membersQuery.data?.length ?? project.memberCount ?? 0)}
+                    />
+                  ) : null}
+                  <Stat
+                    label="Integrations"
+                    value={
+                      [project.jiraProjectKey && "Jira", project.adoProject && "ADO"]
+                        .filter(Boolean)
+                        .join(" · ") || "None"
+                    }
+                  />
+                </div>
 
-            <dl className="grid gap-4 border-t border-[var(--line)] p-5 text-sm md:grid-cols-3">
-              <Meta label="Jira key" value={project.jiraProjectKey || "—"} />
-              <Meta label="ADO project" value={project.adoProject || "—"} />
-              <Meta label="ADO org URL" value={project.adoOrgUrl || "—"} breakAll />
-            </dl>
+                <dl className="grid gap-4 border-t border-[var(--line)] p-5 text-sm md:grid-cols-3">
+                  <Meta label="Jira key" value={project.jiraProjectKey || "—"} />
+                  <Meta label="ADO project" value={project.adoProject || "—"} />
+                  <Meta label="ADO org URL" value={project.adoOrgUrl || "—"} breakAll />
+                </dl>
+              </>
+            )}
           </header>
 
-          <section className="tb-card p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-base font-bold text-[var(--ink)]">Cycles</h3>
-              <p className="text-xs text-[var(--muted)]">Filter the bug list</p>
-            </div>
-            {cyclesQuery.isLoading && (
-              <p className="mt-3 text-sm text-[var(--muted)]">Loading cycles…</p>
-            )}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <CycleChip
-                active={cycleFilter === ""}
-                onClick={() => setCycleFilter("")}
-                label="All cycles"
-              />
-              {cyclesQuery.data?.map((cycle) => (
-                <CycleChip
-                  key={cycle.id}
-                  active={cycleFilter === cycle.id}
-                  onClick={() => setCycleFilter(cycle.id)}
-                  label={cycle.name}
-                  badge={cycle.isDefault ? "Default" : undefined}
-                />
-              ))}
-            </div>
-          </section>
+          <ProjectModulesPanel
+            projectId={project.id}
+            modules={modulesQuery.data ?? []}
+            loading={modulesQuery.isLoading}
+            canManage={canModules}
+            moduleName={moduleName}
+            onModuleNameChange={setModuleName}
+            onCreate={() => createModuleMutation.mutate(moduleName.trim())}
+            creating={createModuleMutation.isPending}
+            onRename={(moduleId, name) => renameModuleMutation.mutate({ moduleId, name })}
+            renaming={renameModuleMutation.isPending}
+            onDelete={(modId) => deleteModuleMutation.mutate(modId)}
+            deleting={deleteModuleMutation.isPending}
+            error={moduleError}
+          />
 
-          <section className="space-y-3">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-bold text-[var(--ink)]">
-                  Bugs
-                  <span className="ml-2 text-base font-semibold text-[var(--muted)]">
-                    ({bugs.length})
-                  </span>
-                </h3>
-                <p className="mt-1 text-sm text-[var(--muted)]">
-                  Click a bug title to open full details, steps, and screenshots.
-                </p>
-              </div>
-              <Link to="/bugs" className="tb-link text-sm">
-                All bugs →
-              </Link>
-            </div>
-
-            {bugsQuery.isLoading && (
-              <p className="text-sm text-[var(--muted)]">Loading bugs…</p>
-            )}
-            {bugsQuery.error && (
-              <p className="tb-alert-error">{(bugsQuery.error as Error).message}</p>
-            )}
-            {!bugsQuery.isLoading && bugs.length === 0 && (
-              <div className="tb-card border-dashed p-8 text-center">
-                <p className="font-medium text-[var(--ink)]">No bugs in this view</p>
-                <p className="mt-2 text-sm text-[var(--muted)]">
-                  {cycleFilter
-                    ? "Try another cycle, or clear the cycle filter."
-                    : "File a bug from the extension — it will show up in this list."}
-                </p>
-              </div>
-            )}
-
-            {bugs.length > 0 && (
-              <div className="tb-card overflow-hidden">
-                <div className="hidden border-b border-[var(--line)] bg-slate-50 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)] sm:grid sm:grid-cols-[1.75rem_3.5rem_1.25rem_minmax(0,1fr)_11rem_6rem_4rem_7rem_8rem] sm:gap-4">
-                  <span />
-                  <span>ID</span>
-                  <span />
-                  <span>Title</span>
-                  <span>Assignee</span>
-                  <span>Status</span>
-                  <span>Priority</span>
-                  <span>Activity</span>
-                  <span className="text-right">Cycle</span>
-                </div>
-                {bugs.map((bug) => (
-                  <BugListRow
-                    key={bug.id}
-                    bug={bug}
-                    assigneeName={nameOf(bug.assigneeId)}
-                    cycleName={cycleName(bug.cycleId)}
-                    projectName={project.name}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
+          {showMembersSection ? (
+            <ProjectMembersPanel
+              members={members}
+              addableUsers={addableUsers}
+              currentUserId={user?.id}
+              canManage={canMembers}
+              showUsersLink={canTransferRoles(user)}
+              addUserId={addUserId}
+              onAddUserIdChange={setAddUserId}
+              onAdd={() => addMemberMutation.mutate(addUserId)}
+              adding={addMemberMutation.isPending}
+              onRemove={(userId) => removeMemberMutation.mutate(userId)}
+              removing={removeMemberMutation.isPending}
+              loading={membersQuery.isLoading}
+              error={memberError}
+              message={memberMessage}
+              listError={membersQuery.error as Error | null}
+            />
+          ) : null}
         </div>
       )}
     </Shell>
@@ -210,36 +294,5 @@ function Meta({
       <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">{label}</dt>
       <dd className={`mt-1 font-medium ${breakAll ? "break-all" : ""}`}>{value}</dd>
     </div>
-  );
-}
-
-function CycleChip({
-  label,
-  badge,
-  active,
-  onClick,
-}: {
-  label: string;
-  badge?: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
-        active
-          ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
-          : "border-[var(--line)] bg-[var(--input-bg)] text-[var(--ink)] hover:border-[var(--accent)]/40"
-      }`}
-    >
-      {label}
-      {badge && (
-        <span className="rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-[var(--accent)]">
-          {badge}
-        </span>
-      )}
-    </button>
   );
 }

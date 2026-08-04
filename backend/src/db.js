@@ -101,6 +101,134 @@ export async function ensureSchema() {
       annotations JSONB,
       created_at TIMESTAMPTZ NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS project_members (
+      project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (project_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS organizations (
+      id UUID PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS organization_members (
+      organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (organization_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS modules (
+      id UUID PRIMARY KEY,
+      project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS bug_comments (
+      id UUID PRIMARY KEY,
+      bug_id UUID NOT NULL REFERENCES bugs(id) ON DELETE CASCADE,
+      author_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      body VARCHAR(4000) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true
+  `);
+
+  // Backfill organization_id on projects, then enforce NOT NULL
+  await query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS organization_id UUID
+  `);
+  await query(`
+    DO $$
+    DECLARE
+      demo_org UUID;
+    BEGIN
+      IF EXISTS (SELECT 1 FROM projects WHERE organization_id IS NULL) THEN
+        SELECT id INTO demo_org FROM organizations WHERE name = 'Demo Organization' LIMIT 1;
+        IF demo_org IS NULL THEN
+          demo_org := '00000000-0000-4000-8000-000000000001';
+          INSERT INTO organizations (id, name, created_at)
+          VALUES (demo_org, 'Demo Organization', NOW())
+          ON CONFLICT (id) DO NOTHING;
+          SELECT id INTO demo_org FROM organizations WHERE name = 'Demo Organization' LIMIT 1;
+        END IF;
+        UPDATE projects SET organization_id = demo_org WHERE organization_id IS NULL;
+      END IF;
+    END $$;
+  `);
+  await query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'projects' AND column_name = 'organization_id'
+          AND is_nullable = 'YES'
+      ) THEN
+        ALTER TABLE projects ALTER COLUMN organization_id SET NOT NULL;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'projects_organization_id_fkey'
+      ) THEN
+        ALTER TABLE projects
+          ADD CONSTRAINT projects_organization_id_fkey
+          FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE;
+      END IF;
+    END $$;
+  `);
+
+  await query(`
+    ALTER TABLE bugs
+    ADD COLUMN IF NOT EXISTS module_id UUID
+  `);
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'bugs_module_id_fkey'
+      ) THEN
+        ALTER TABLE bugs
+          ADD CONSTRAINT bugs_module_id_fkey
+          FOREIGN KEY (module_id) REFERENCES modules(id) ON DELETE SET NULL;
+      END IF;
+    END $$;
+  `);
+
+  // Allow SUPERADMIN (+ legacy roles). Older Hibernate check may omit SUPERADMIN.
+  await query(`
+    DO $$
+    DECLARE
+      r RECORD;
+    BEGIN
+      FOR r IN
+        SELECT con.conname
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+        WHERE nsp.nspname = 'public'
+          AND rel.relname = 'users'
+          AND con.contype = 'c'
+          AND pg_get_constraintdef(con.oid) ILIKE '%role%'
+      LOOP
+        EXECUTE format('ALTER TABLE users DROP CONSTRAINT %I', r.conname);
+      END LOOP;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'users_role_check'
+      ) THEN
+        ALTER TABLE users
+          ADD CONSTRAINT users_role_check
+          CHECK (role IN ('SUPERADMIN','ADMIN','MANAGER','DEVELOPER','TESTER'));
+      END IF;
+    END $$;
   `);
 
   // Existing DBs created before actual_result

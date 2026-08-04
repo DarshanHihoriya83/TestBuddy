@@ -20,3 +20,7 @@ export function notFound(message) {
 export function conflict(message) {
   return new HttpError(409, message);
 }
+
+export function forbidden(message = "Forbidden") {
+  return new HttpError(403, message);
+}

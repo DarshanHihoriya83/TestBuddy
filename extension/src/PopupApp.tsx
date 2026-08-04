@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import browser from "webextension-polyfill";
 import {
+  assertExtensionTester,
   clearSession,
   createBug,
   fetchCycles,
+  fetchMe,
+  fetchModules,
   fetchProjects,
   fetchUsers,
   getApiBase,
   getToken,
+  humanizeStepsWithAi,
   login,
   polishBugWithAi,
   setSession,
@@ -20,7 +24,7 @@ import {
 import { composeBugDescription } from "./content/bugCapture";
 import { polishBugCopy, polishBugDescription, polishBugTitle } from "./bugPolish";
 import { renderBoldText } from "./renderBold";
-import type { BugPriority, BugSeverity, Cycle, Project, User } from "./types";
+import type { BugPriority, BugSeverity, Cycle, Module, Project, User } from "./types";
 
 type Mode = "BUG" | "TEST_CASE";
 
@@ -37,8 +41,10 @@ export function PopupApp() {
   const [users, setUsers] = useState<User[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
+  const [modules, setModules] = useState<Module[]>([]);
   const [projectId, setProjectId] = useState("");
   const [cycleId, setCycleId] = useState("");
+  const [moduleId, setModuleId] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -46,12 +52,32 @@ export function PopupApp() {
   const [recording, setRecording] = useState<RecordingSession>(EMPTY_SESSION);
   const [polishMsg, setPolishMsg] = useState<string | null>(null);
   const [polishBusy, setPolishBusy] = useState(false);
+  const [stepsAiBusy, setStepsAiBusy] = useState(false);
+  const [stepsAiMsg, setStepsAiMsg] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
       const [storedToken, storedApi] = await Promise.all([getToken(), getApiBase()]);
-      setToken(storedToken);
       setApiBase(storedApi);
+      if (!storedToken) {
+        setToken(null);
+        return;
+      }
+      try {
+        // Re-validate: extension sessions must be Tester-only
+        const me = await fetchMe();
+        assertExtensionTester(me);
+        await setSession(storedToken, storedApi, me);
+        setToken(storedToken);
+      } catch (err) {
+        await clearSession();
+        setToken(null);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Session expired. Sign in with a Tester account.",
+        );
+      }
       const res = (await browser.runtime.sendMessage({ type: "GET_RECORDING_STATE" })) as {
         ok: boolean;
         session?: RecordingSession;
@@ -94,15 +120,49 @@ export function PopupApp() {
     if (!token || !projectId) return;
     void (async () => {
       try {
-        const list = await fetchCycles(projectId);
-        setCycles(list);
-        const def = list.find((c) => c.isDefault) ?? list[0];
-        setCycleId(def?.id ?? "");
+        const [cycleList, moduleList] = await Promise.all([
+          fetchCycles(projectId),
+          fetchModules(projectId),
+        ]);
+        setCycles(cycleList);
+        setModules(moduleList);
+        const def = cycleList.find((c) => c.isDefault) ?? cycleList[0];
+        setCycleId((prev) =>
+          prev && cycleList.some((c) => c.id === prev) ? prev : def?.id ?? "",
+        );
+        // Keep current module if still valid; otherwise default to first / empty
+        setModuleId((prev) => {
+          if (prev && moduleList.some((m) => m.id === prev)) return prev;
+          return moduleList[0]?.id ?? "";
+        });
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load cycles");
+        setError(e instanceof Error ? e.message : "Failed to load project catalog");
       }
     })();
   }, [token, projectId]);
+
+  // When a stopped recording loads, restore project/module/cycle from its meta
+  useEffect(() => {
+    if (recording.status !== "stopped" || !recording.meta) return;
+    if (recording.meta.projectId) setProjectId(recording.meta.projectId);
+    if (recording.meta.cycleId) setCycleId(recording.meta.cycleId);
+    if (recording.meta.moduleId) setModuleId(recording.meta.moduleId);
+    if (recording.meta.assigneeId) setAssigneeId(recording.meta.assigneeId);
+  }, [recording.status, recording.meta]);
+
+  async function patchRecordingModule(nextModuleId: string) {
+    setModuleId(nextModuleId);
+    if (recording.status !== "stopped" || !recording.meta) return;
+    const moduleName = modules.find((m) => m.id === nextModuleId)?.name;
+    const res = (await browser.runtime.sendMessage({
+      type: "PATCH_RECORDING_META",
+      meta: {
+        moduleId: nextModuleId || undefined,
+        moduleName: moduleName || undefined,
+      },
+    })) as { ok: boolean; session?: RecordingSession };
+    if (res?.ok && res.session) setRecording(res.session);
+  }
 
   const canStart = useMemo(
     () =>
@@ -112,9 +172,10 @@ export function PopupApp() {
       projectId &&
       cycleId &&
       assigneeId &&
+      (modules.length === 0 || !!moduleId) &&
       !busy &&
       recording.status === "idle",
-    [mode, title, description, projectId, cycleId, assigneeId, busy, recording.status],
+    [mode, title, description, projectId, cycleId, moduleId, modules.length, assigneeId, busy, recording.status],
   );
 
   const canSubmitRecording = useMemo(
@@ -122,8 +183,9 @@ export function PopupApp() {
       recording.status === "stopped" &&
       !!recording.meta &&
       recording.steps.length > 0 &&
-      !busy,
-    [recording, busy],
+      !busy &&
+      !stepsAiBusy,
+    [recording, busy, stepsAiBusy],
   );
 
   async function generateWithAi(mode: "both" | "title" | "description") {
@@ -188,10 +250,13 @@ export function PopupApp() {
     setMessage(null);
     try {
       const result = await login(email, password, apiBase);
-      await setSession(result.token, apiBase);
+      assertExtensionTester(result.user);
+      await setSession(result.token, apiBase, result.user);
       setToken(result.token);
-      setMessage(`Signed in as ${result.user.name}`);
+      setMessage(`Signed in as ${result.user.name} (Tester)`);
     } catch (err) {
+      await clearSession();
+      setToken(null);
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
       setBusy(false);
@@ -228,6 +293,8 @@ export function PopupApp() {
           assigneeId,
           cycleId,
           projectId,
+          moduleId: moduleId || undefined,
+          moduleName: modules.find((m) => m.id === moduleId)?.name,
         },
       })) as { ok: boolean; session?: RecordingSession; error?: string };
 
@@ -247,12 +314,77 @@ export function PopupApp() {
     }
   }
 
+  async function polishRecordingSteps(session: RecordingSession): Promise<RecordingSession> {
+    if (!session.steps.length) return session;
+    const shotOverview = new Map(
+      (session.screenshots || []).map((s) => [s.id, s.overview] as const),
+    );
+    const result = await humanizeStepsWithAi({
+      title: session.meta?.title || title,
+      description: session.meta?.description || description,
+      steps: session.steps.map((step) => ({
+        order: step.order,
+        actionType: step.actionType,
+        elementLabel: step.elementLabel,
+        valueEntered: step.valueEntered,
+        pageUrl: step.pageUrl,
+        screenshotId: step.screenshotId,
+        overview: step.screenshotId ? shotOverview.get(step.screenshotId) : undefined,
+        description: step.description,
+        actualResult: step.actualResult,
+        expectedResult: step.expectedResult,
+        isDefect: Boolean(step.screenshotId || step.expectedResult?.trim()),
+      })),
+    });
+
+    const patchRes = (await browser.runtime.sendMessage({
+      type: "PATCH_STEP_TEXTS",
+      steps: result.steps,
+    })) as { ok: boolean; session?: RecordingSession };
+
+    const next = patchRes.ok && patchRes.session ? patchRes.session : session;
+    const who = result.ai
+      ? `AI (${result.provider || "LLM"})`
+      : `local templates${result.warning ? " — check Groq / AI service" : ""}`;
+    setStepsAiMsg(`Steps / Actual / Expected rewritten with ${who}`);
+    return next;
+  }
+
   async function onStopRecording() {
+    setError(null);
+    setStepsAiMsg(null);
     const res = (await browser.runtime.sendMessage({ type: "STOP_RECORDING" })) as {
       ok: boolean;
       session?: RecordingSession;
     };
-    if (res.ok && res.session) setRecording(res.session);
+    if (!res.ok || !res.session) return;
+
+    setRecording(res.session);
+    setStepsAiBusy(true);
+    try {
+      const polished = await polishRecordingSteps(res.session);
+      setRecording(polished);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "AI step polish failed";
+      setStepsAiMsg(`Kept recorded step text (AI unavailable: ${msg.slice(0, 80)})`);
+    } finally {
+      setStepsAiBusy(false);
+    }
+  }
+
+  async function onImproveStepsWithAi() {
+    if (recording.status !== "stopped" || !recording.steps.length) return;
+    setStepsAiBusy(true);
+    setStepsAiMsg(null);
+    setError(null);
+    try {
+      const polished = await polishRecordingSteps(recording);
+      setRecording(polished);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not improve steps with AI");
+    } finally {
+      setStepsAiBusy(false);
+    }
   }
 
   async function onClearRecording() {
@@ -272,8 +404,10 @@ export function PopupApp() {
     setError(null);
     setMessage(null);
     try {
+      assertExtensionTester(await fetchMe());
       const bug = await createBug({
         ...recording.meta,
+        moduleId: moduleId || recording.meta.moduleId || undefined,
         description: composeBugDescription(
           recording.meta.description,
           recording.screenshots || [],
@@ -323,7 +457,7 @@ export function PopupApp() {
       <div className="app">
         <div className="brand">
           <h1>TestBuddy</h1>
-          <p>Sign in to record a bug</p>
+          <p>Tester sign-in — record &amp; file bugs</p>
         </div>
         <form className="panel" onSubmit={onLogin}>
           <label>
@@ -344,11 +478,15 @@ export function PopupApp() {
             />
           </label>
           <button className="primary" type="submit" disabled={busy}>
-            {busy ? "Signing in…" : "Sign in"}
+            {busy ? "Signing in…" : "Sign in as Tester"}
           </button>
           {error && <div className="status error">{error}</div>}
           {message && <div className="status">{message}</div>}
-          <p className="hint">Demo: alice@testbuddy.local / password</p>
+          <p className="hint">
+            Only <strong>Tester</strong> accounts can use the extension.
+            <br />
+            Demo: alice@testbuddy.local / password
+          </p>
         </form>
       </div>
     );
@@ -426,13 +564,49 @@ export function PopupApp() {
             )}
             {recording.status === "stopped" && (
               <>
+                <label className="live-module">
+                  Module
+                  <select
+                    value={moduleId}
+                    onChange={(e) => void patchRecordingModule(e.target.value)}
+                    required={modules.length > 0}
+                    disabled={busy || stepsAiBusy}
+                  >
+                    {modules.length === 0 ? (
+                      <option value="">No modules in this project</option>
+                    ) : (
+                      <>
+                        <option value="" disabled>
+                          Select module…
+                        </option>
+                        {modules.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </>
+                    )}
+                  </select>
+                </label>
                 <button
                   className="primary"
                   type="button"
-                  disabled={!canSubmitRecording}
+                  disabled={
+                    !canSubmitRecording ||
+                    stepsAiBusy ||
+                    (modules.length > 0 && !moduleId)
+                  }
                   onClick={() => void onSubmitRecording()}
                 >
                   {busy ? "Uploading…" : "Upload bug with steps"}
+                </button>
+                <button
+                  className="linkish"
+                  type="button"
+                  disabled={stepsAiBusy || recording.steps.length === 0}
+                  onClick={() => void onImproveStepsWithAi()}
+                >
+                  {stepsAiBusy ? "AI rewriting steps…" : "✨ Improve Actual / Expected with AI"}
                 </button>
                 <button className="linkish" type="button" onClick={() => void onClearRecording()}>
                   Discard recording
@@ -440,9 +614,12 @@ export function PopupApp() {
               </>
             )}
           </div>
+          {stepsAiBusy && (
+            <div className="status polish-ok">Rewriting Step / Actual / Expected with Groq AI…</div>
+          )}
+          {stepsAiMsg && !stepsAiBusy && <div className="status polish-ok">{stepsAiMsg}</div>}
         </div>
       )}
-
       <div className="mode-toggle">
         <button
           type="button"
@@ -574,6 +751,29 @@ export function PopupApp() {
                   {c.isDefault ? " (default)" : ""}
                 </option>
               ))}
+            </select>
+          </label>
+          <label>
+            Module
+            <select
+              value={moduleId}
+              onChange={(e) => setModuleId(e.target.value)}
+              required={modules.length > 0}
+            >
+              {modules.length === 0 ? (
+                <option value="">No modules in this project</option>
+              ) : (
+                <>
+                  <option value="" disabled>
+                    Select module…
+                  </option>
+                  {modules.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </>
+              )}
             </select>
           </label>
           <label>

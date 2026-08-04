@@ -176,6 +176,8 @@ function boot() {
     const root = ensureUi();
     const latest = [...session.steps].slice(-8).reverse();
     const shotCount = session.screenshots?.length || 0;
+    const moduleLabel = session.meta?.moduleName || (session.meta?.moduleId ? "Module selected" : "No module");
+    const canUpload = Boolean(session.meta?.moduleId && session.steps.length > 0);
     root.innerHTML = `
       <div class="rs-bar">
         <div class="rs-top">
@@ -189,13 +191,17 @@ function boot() {
             <span class="rs-count-label">steps</span>
           </div>
         </div>
-        <div class="rs-actions rs-actions-3">
+        <div class="rs-module" title="Bug will upload into this module">
+          Module: <strong>${escapeHtml(moduleLabel)}</strong>
+        </div>
+        <div class="rs-actions rs-actions-4">
           ${
             session.status === "recording"
               ? `<button type="button" data-action="pause">Pause</button>`
               : `<button type="button" data-action="resume">Resume</button>`
           }
           <button type="button" data-action="capture">Screenshot</button>
+          <button type="button" class="rs-upload" data-action="upload" ${canUpload ? "" : "disabled"}>Upload bug</button>
           <button type="button" class="rs-stop" data-action="stop">Stop</button>
         </div>
         ${
@@ -244,9 +250,79 @@ function boot() {
         if (action === "resume") void send("RESUME_RECORDING");
         if (action === "stop") void send("STOP_RECORDING");
         if (action === "capture") void startScreenshotCapture();
+        if (action === "upload") void uploadBugToModule();
       });
     });
   }
+
+  function escapeHtml(value: string) {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  async function uploadBugToModule() {
+    if (!IS_TOP_FRAME || !session?.meta?.moduleId) {
+      window.alert("TestBuddy: select a module in the popup before starting recording.");
+      return;
+    }
+    if (!session.steps.length) {
+      window.alert("TestBuddy: capture at least one step or screenshot before upload.");
+      return;
+    }
+    const moduleLabel = session.meta.moduleName || "selected module";
+    const ok = window.confirm(
+      `Upload this bug directly to module "${moduleLabel}"?\n\n${session.steps.length} step(s), ${session.screenshots?.length || 0} screenshot(s).`,
+    );
+    if (!ok) return;
+
+    const uploadBtn = document.querySelector(`#${ROOT_ID} button[data-action="upload"]`) as
+      | HTMLButtonElement
+      | null;
+    if (uploadBtn) {
+      uploadBtn.disabled = true;
+      uploadBtn.textContent = "Uploading…";
+    }
+
+    try {
+      const res = (await browser.runtime.sendMessage({ type: "UPLOAD_BUG" })) as {
+        ok: boolean;
+        session?: RecordingSession;
+        bugId?: string;
+        message?: string;
+        error?: string;
+      };
+      if (!res?.ok) {
+        throw new Error(res?.error || "Upload failed");
+      }
+      session = res.session || EMPTY_SESSION_LIKE;
+      window.alert(
+        `TestBuddy: ${res.message || "Bug uploaded"}${res.bugId ? `\nID: ${res.bugId}` : ""}`,
+      );
+      document.getElementById(ROOT_ID)?.remove();
+      unbindListeners();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      window.alert(`TestBuddy: could not upload bug.\n${msg}`);
+      if (uploadBtn) {
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = "Upload bug";
+      }
+      render();
+    }
+  }
+
+  const EMPTY_SESSION_LIKE: RecordingSession = {
+    status: "idle",
+    meta: null,
+    steps: [],
+    screenshots: [],
+    tabId: null,
+    startedAt: null,
+    updatedAt: null,
+  };
 
   async function startScreenshotCapture() {
     if (!IS_TOP_FRAME || annotating || !session) return;
@@ -708,10 +784,18 @@ function injectStyles() {
     #${ROOT_ID} .rs-count-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #5c6b7a; }
     #${ROOT_ID} .rs-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
     #${ROOT_ID} .rs-actions-3 { grid-template-columns: 1fr 1fr 1fr; }
+    #${ROOT_ID} .rs-actions-4 { grid-template-columns: 1fr 1fr; }
+    #${ROOT_ID} .rs-module {
+      margin-top: 8px; font-size: 11px; color: #5c6b7a;
+      padding: 6px 8px; border-radius: 8px; background: #f3f6f9;
+    }
+    #${ROOT_ID} .rs-module strong { color: #0f6e56; }
     #${ROOT_ID} button {
       border: 1px solid #d7dee7; background: #fff; border-radius: 10px;
       padding: 8px 6px; font-size: 11px; font-weight: 600; cursor: pointer; color: #1a2332;
     }
+    #${ROOT_ID} button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #${ROOT_ID} button.rs-upload { background: #0b6bcb; border-color: #0b6bcb; color: #fff; }
     #${ROOT_ID} button.rs-stop { background: #0f6e56; border-color: #0f6e56; color: #fff; }
     #${ROOT_ID} .rs-shots {
       margin-top: 8px; font-size: 11px; color: #0f6e56; font-weight: 600;

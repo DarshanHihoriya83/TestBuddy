@@ -442,3 +442,17 @@ button.linkish {
   flex-direction: column;
   gap: 8px;
 }
+
+.live-module {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.live-module select {
+  font-weight: 500;
+  width: 100%;
+}

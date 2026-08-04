@@ -108,27 +108,31 @@ export function buildActualResult(args: StepTextArgs): string {
 export function buildExpectedForDefect(overview: string): string {
   const text = overview.trim().replace(/\s+/g, " ");
   if (!text) {
-    return "The highlighted area should behave correctly according to the requirements";
+    return "The feature should complete successfully according to the product requirements.";
   }
   const lower = text.toLowerCase();
+  const quoted = text.length > 120 ? `${text.slice(0, 117)}…` : text;
 
-  if (/not\s+(receive|received|coming|arrive)|missing|nahi\s+aa/.test(lower)) {
-    return `The system should deliver / show the expected result correctly — issue "${text}" should not occur`;
+  if (/otp|otp\s+not|not\s+(receive|received|coming|arrive)|missing|nahi\s+aa/.test(lower)) {
+    return `The system should deliver the expected OTP/message successfully. Issue “${quoted}” should not occur.`;
   }
-  if (/accept|allow|invalid|non[- ]?digit|character|letter|validation/.test(lower)) {
-    return `The field should validate input correctly and prevent the reported issue: ${text}`;
+  if (/accept|allow|invalid|non[- ]?digit|character|letter|alphabet|validation/.test(lower)) {
+    return `The field should validate input correctly and reject invalid data. Issue “${quoted}” should not occur.`;
   }
-  if (/error|fail|broken|not\s+work|unable|cannot/.test(lower)) {
-    return `The action should complete successfully without the reported failure: ${text}`;
+  if (/error|fail|broken|not\s+work|unable|cannot|nahi\s+chal/.test(lower)) {
+    return `The action should complete successfully without this failure. Issue “${quoted}” should not occur.`;
   }
-  if (/display|show|visible|ui|layout|align/.test(lower)) {
-    return `The UI should display the correct content/layout — "${text}" should not appear`;
+  if (/display|show|visible|ui|layout|align|wrong\s+text/.test(lower)) {
+    return `The UI should display the correct content and layout. “${quoted}” should not appear.`;
   }
-  if (/slow|lag|performance/.test(lower)) {
-    return `The page/feature should respond within an acceptable time without the reported delay`;
+  if (/slow|lag|performance|timeout/.test(lower)) {
+    return "The page/feature should respond within an acceptable time without the reported delay.";
+  }
+  if (/login|sign\s*in|auth/.test(lower)) {
+    return `Authentication should complete successfully for valid credentials. Issue “${quoted}” should not occur.`;
   }
 
-  return `The system should behave correctly and the following defect should not occur: ${text}`;
+  return `The system should behave as designed. The following defect should not occur: ${quoted}.`;
 }
 
 /** @deprecated Use buildStepAction */

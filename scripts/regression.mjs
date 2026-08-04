@@ -14,6 +14,8 @@ let cycleId = "";
 let assigneeId = "";
 let bugId = "";
 let createdProjectId = "";
+let organizationId = "";
+let moduleId = "";
 
 function pass(name, detail = "") {
   results.push({ ok: true, name, detail });
@@ -40,6 +42,19 @@ async function api(path, init = {}) {
     json = text;
   }
   return { res, json, text };
+}
+
+async function loginAs(email, password = "password") {
+  const login = await api("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+  if (!login.res.ok || !login.json?.token) {
+    throw new Error(`login failed for ${email}: ${login.text}`);
+  }
+  token = login.json.token;
+  userId = login.json.user.id;
+  return login.json.user;
 }
 
 async function testHealth() {
@@ -79,11 +94,21 @@ async function testAuth() {
       name: "Regression User",
       email,
       password: "password123",
-      role: "TESTER",
+      role: "MANAGER",
     }),
   });
-  if (reg.res.ok && reg.json?.token) pass("POST /api/auth/register", email);
-  else fail("POST /api/auth/register", reg.text);
+  if (reg.res.ok && reg.json?.token && reg.json?.user?.role === "TESTER") {
+    pass("POST /api/auth/register", `${email} (forced TESTER)`);
+  } else fail("POST /api/auth/register", reg.text || `role=${reg.json?.user?.role}`);
+
+  // New signups must see Demo org projects (auto-enrolled)
+  const prevToken = token;
+  token = reg.json?.token;
+  const enrolled = await api("/api/projects");
+  if (enrolled.res.ok && Array.isArray(enrolled.json) && enrolled.json.length >= 1) {
+    pass("Register enrolls into demo projects", `${enrolled.json.length} project(s)`);
+  } else fail("Register enrolls into demo projects", enrolled.text);
+  token = prevToken;
 
   const dup = await api("/api/auth/register", {
     method: "POST",
@@ -94,11 +119,19 @@ async function testAuth() {
 }
 
 async function testCatalog() {
+  await loginAs("admin@testbuddy.local");
+
   const users = await api("/api/users");
   if (users.res.ok && Array.isArray(users.json) && users.json.length >= 4) {
     pass("GET /api/users", `${users.json.length} users`);
     assigneeId = users.json.find((u) => u.role === "TESTER")?.id || users.json[0].id;
   } else fail("GET /api/users", users.text);
+
+  const orgs = await api("/api/organizations");
+  if (orgs.res.ok && Array.isArray(orgs.json) && orgs.json.length >= 1) {
+    organizationId = orgs.json[0].id;
+    pass("GET /api/organizations", `${orgs.json.length} org(s)`);
+  } else fail("GET /api/organizations", orgs.text);
 
   const projects = await api("/api/projects");
   if (projects.res.ok && Array.isArray(projects.json)) {
@@ -108,7 +141,10 @@ async function testCatalog() {
 
   const create = await api("/api/projects", {
     method: "POST",
-    body: JSON.stringify({ name: `Regression ${Date.now()}` }),
+    body: JSON.stringify({
+      name: `Regression ${Date.now()}`,
+      organizationId,
+    }),
   });
   if (create.res.status === 201 && create.json?.id) {
     createdProjectId = create.json.id;
@@ -131,7 +167,322 @@ async function testCatalog() {
   else fail("GET /api/cycles requires projectId", `status ${noProject.res.status}`);
 }
 
+async function testOrgRbac() {
+  // SuperAdmin creates org
+  await loginAs("superadmin@testbuddy.local");
+  const orgCreate = await api("/api/organizations", {
+    method: "POST",
+    body: JSON.stringify({ name: `RegOrg ${Date.now()}` }),
+  });
+  let regOrgId = orgCreate.json?.id;
+  if (orgCreate.res.status === 201 && regOrgId) {
+    pass("POST /api/organizations (SuperAdmin)", orgCreate.json.name);
+  } else fail("POST /api/organizations (SuperAdmin)", orgCreate.text);
+
+  // Tester cannot create org
+  await loginAs("alice@testbuddy.local");
+  const testerOrg = await api("/api/organizations", {
+    method: "POST",
+    body: JSON.stringify({ name: "Nope Org" }),
+  });
+  if (testerOrg.res.status === 403) pass("Tester forbidden create organization");
+  else fail("Tester forbidden create organization", `status ${testerOrg.res.status}`);
+
+  // Tester cannot create project
+  const testerProj = await api("/api/projects", {
+    method: "POST",
+    body: JSON.stringify({ name: "Nope", organizationId: organizationId || regOrgId }),
+  });
+  if (testerProj.res.status === 403) pass("Tester forbidden create project");
+  else fail("Tester forbidden create project", `status ${testerProj.res.status}`);
+
+  // Developer cannot create project
+  await loginAs("bob@testbuddy.local");
+  const devProj = await api("/api/projects", {
+    method: "POST",
+    body: JSON.stringify({ name: "Nope Dev", organizationId }),
+  });
+  if (devProj.res.status === 403) pass("Developer forbidden create project");
+  else fail("Developer forbidden create project", `status ${devProj.res.status}`);
+
+  // Manager can create project under org they belong to
+  await loginAs("superadmin@testbuddy.local");
+  const carolLogin = await api("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email: "carol@testbuddy.local", password: "password" }),
+  });
+  const carolId = carolLogin.json?.user?.id;
+  if (regOrgId && carolId) {
+    await api(`/api/organizations/${regOrgId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ userId: carolId }),
+    });
+  }
+  await loginAs("carol@testbuddy.local");
+  const mgrProj = await api("/api/projects", {
+    method: "POST",
+    body: JSON.stringify({
+      name: `MgrProj ${Date.now()}`,
+      organizationId: regOrgId || organizationId,
+    }),
+  });
+  const mgrProjId = mgrProj.json?.id;
+  if (mgrProj.res.status === 201 && mgrProjId) pass("Manager create project");
+  else fail("Manager create project", mgrProj.text);
+
+  // Admin outside the org cannot update/delete that project
+  await loginAs("admin@testbuddy.local");
+  if (mgrProjId) {
+    const stealUpdate = await api(`/api/projects/${mgrProjId}`, {
+      method: "PUT",
+      body: JSON.stringify({ name: "Stolen" }),
+    });
+    if (stealUpdate.res.status === 403) pass("Admin outside org forbidden update project");
+    else fail("Admin outside org forbidden update project", `status ${stealUpdate.res.status}`);
+
+    const stealDelete = await api(`/api/projects/${mgrProjId}`, { method: "DELETE" });
+    if (stealDelete.res.status === 403) pass("Admin outside org forbidden delete project");
+    else fail("Admin outside org forbidden delete project", `status ${stealDelete.res.status}`);
+  }
+
+  // Cross-tenant IDOR: Tester cannot read/join foreign project
+  await loginAs("alice@testbuddy.local");
+  const aliceMe = await api("/api/auth/me");
+  if (mgrProjId) {
+    const stealGet = await api(`/api/projects/${mgrProjId}`);
+    if (stealGet.res.status === 403) pass("Tester forbidden get foreign project");
+    else fail("Tester forbidden get foreign project", `status ${stealGet.res.status}`);
+
+    const stealCycles = await api(`/api/cycles?projectId=${mgrProjId}`);
+    if (stealCycles.res.status === 403) pass("Tester forbidden list foreign cycles");
+    else fail("Tester forbidden list foreign cycles", `status ${stealCycles.res.status}`);
+
+    const stealMembers = await api(`/api/projects/${mgrProjId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ userId: aliceMe.json?.id }),
+    });
+    if (stealMembers.res.status === 403) pass("Tester forbidden self-join foreign project");
+    else fail("Tester forbidden self-join foreign project", `status ${stealMembers.res.status}`);
+
+    const stealMods = await api(`/api/projects/${mgrProjId}/modules`, {
+      method: "POST",
+      body: JSON.stringify({ name: "Hijack" }),
+    });
+    if (stealMods.res.status === 403) pass("Tester forbidden module on foreign project");
+    else fail("Tester forbidden module on foreign project", `status ${stealMods.res.status}`);
+
+    const stealBug = await api("/api/bugs", {
+      method: "POST",
+      body: JSON.stringify({
+        title: "Should fail",
+        description: "No access",
+        priority: "LOW",
+        severity: "MINOR",
+        assigneeId: aliceMe.json?.id || assigneeId,
+        cycleId: crypto.randomUUID(),
+        projectId: mgrProjId,
+        status: "NEW",
+        steps: [],
+      }),
+    });
+    if (stealBug.res.status === 403) pass("Tester forbidden create bug outside access");
+    else fail("Tester forbidden create bug outside access", `status ${stealBug.res.status} ${stealBug.text}`);
+
+    const stealList = await api(`/api/bugs?projectId=${mgrProjId}`);
+    if (stealList.res.status === 403) pass("Tester forbidden list bugs for foreign project");
+    else fail("Tester forbidden list bugs for foreign project", `status ${stealList.res.status}`);
+  }
+
+  // Tester creates module
+  await loginAs("alice@testbuddy.local");
+  const targetProject = createdProjectId || projectId;
+  const mod = await api(`/api/projects/${targetProject}/modules`, {
+    method: "POST",
+    body: JSON.stringify({ name: `Mod ${Date.now()}` }),
+  });
+  if (mod.res.status === 201 && mod.json?.id) {
+    moduleId = mod.json.id;
+    pass("Tester create module", mod.json.name);
+  } else fail("Tester create module", mod.text);
+
+  // Developer cannot create module
+  await loginAs("bob@testbuddy.local");
+  const badMod = await api(`/api/projects/${targetProject}/modules`, {
+    method: "POST",
+    body: JSON.stringify({ name: "DevMod" }),
+  });
+  if (badMod.res.status === 403) pass("Developer forbidden create module");
+  else fail("Developer forbidden create module", `status ${badMod.res.status}`);
+
+  // Manager assigns Tester → Tester sees project (+ modules)
+  if (mgrProjId) {
+    await loginAs("carol@testbuddy.local");
+    const mgrAdd = await api(`/api/projects/${mgrProjId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ userId: aliceMe.json?.id }),
+    });
+    if (mgrAdd.res.status === 201 || mgrAdd.res.ok) pass("Manager add Tester as project member");
+    else fail("Manager add Tester as project member", mgrAdd.text);
+
+    await loginAs("alice@testbuddy.local");
+    const aliceProjects = await api("/api/projects");
+    const seesMgr =
+      Array.isArray(aliceProjects.json) && aliceProjects.json.some((p) => p.id === mgrProjId);
+    if (seesMgr) pass("Tester sees Manager-assigned project");
+    else fail("Tester sees Manager-assigned project", aliceProjects.text);
+
+    const aliceMods = await api(`/api/projects/${mgrProjId}/modules`);
+    if (aliceMods.res.ok) pass("Tester can list modules on assigned project");
+    else fail("Tester can list modules on assigned project", aliceMods.text);
+
+    // Manager can also add Developer as member
+    await loginAs("carol@testbuddy.local");
+    const bobLogin = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "bob@testbuddy.local", password: "password" }),
+    });
+    const bobUserId = bobLogin.json?.user?.id;
+    if (bobUserId) {
+      const mgrAddBob = await api(`/api/projects/${mgrProjId}/members`, {
+        method: "POST",
+        body: JSON.stringify({ userId: bobUserId }),
+      });
+      if (mgrAddBob.res.status === 201 || mgrAddBob.res.ok) pass("Manager add project member");
+      else fail("Manager add project member", mgrAddBob.text);
+    } else {
+      fail("Manager add project member", "no bob user");
+    }
+  } else {
+    fail("Manager add Tester as project member", "no mgrProjId");
+  }
+
+  // Cleanup manager project + org (SuperAdmin can manage any project)
+  await loginAs("superadmin@testbuddy.local");
+  if (mgrProjId) {
+    await api(`/api/projects/${mgrProjId}`, { method: "DELETE" });
+  }
+  if (regOrgId) {
+    const delOrg = await api(`/api/organizations/${regOrgId}`, { method: "DELETE" });
+    if (delOrg.res.status === 204) pass("DELETE /api/organizations cleanup");
+    else fail("DELETE /api/organizations cleanup", `status ${delOrg.res.status}`);
+  }
+}
+
+async function testRoleTransfer() {
+  await loginAs("alice@testbuddy.local");
+  const aliceMe = await api("/api/auth/me");
+  const aliceId = aliceMe.json?.id;
+
+  const testerAdmin = await api("/api/users/admin");
+  if (testerAdmin.res.status === 403) pass("Tester forbidden users admin list");
+  else fail("Tester forbidden users admin list", `status ${testerAdmin.res.status}`);
+
+  await loginAs("bob@testbuddy.local");
+  const devRole = await api(`/api/users/${aliceId}`, {
+    method: "PUT",
+    body: JSON.stringify({ role: "DEVELOPER" }),
+  });
+  if (devRole.res.status === 403) pass("Developer forbidden role transfer");
+  else fail("Developer forbidden role transfer", `status ${devRole.res.status}`);
+
+  await loginAs("carol@testbuddy.local");
+  const toDev = await api(`/api/users/${aliceId}`, {
+    method: "PUT",
+    body: JSON.stringify({ role: "DEVELOPER" }),
+  });
+  if (toDev.res.ok && toDev.json?.role === "DEVELOPER") pass("Manager role transfer → Developer");
+  else fail("Manager role transfer → Developer", toDev.text);
+
+  const toTester = await api(`/api/users/${aliceId}`, {
+    method: "PUT",
+    body: JSON.stringify({ role: "TESTER" }),
+  });
+  if (toTester.res.ok && toTester.json?.role === "TESTER") pass("Manager role transfer → Tester");
+  else fail("Manager role transfer → Tester", toTester.text);
+
+  const promote = await api(`/api/users/${aliceId}`, {
+    method: "PUT",
+    body: JSON.stringify({ role: "MANAGER" }),
+  });
+  if (promote.res.status === 403) pass("Manager cannot promote to Manager");
+  else fail("Manager cannot promote to Manager", `status ${promote.res.status}`);
+
+  const nameEdit = await api(`/api/users/${aliceId}`, {
+    method: "PUT",
+    body: JSON.stringify({ name: "Nope" }),
+  });
+  if (nameEdit.res.status === 403) pass("Manager cannot edit profile fields");
+  else fail("Manager cannot edit profile fields", `status ${nameEdit.res.status}`);
+
+  // Reset password RBAC
+  const mgrResetTester = await api(`/api/users/${aliceId}/reset-password`, {
+    method: "POST",
+    body: JSON.stringify({ newPassword: "password" }),
+  });
+  if (mgrResetTester.res.ok) pass("Manager reset Tester password");
+  else fail("Manager reset Tester password", mgrResetTester.text);
+
+  const adminLogin = await api("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email: "admin@testbuddy.local", password: "password" }),
+  });
+  const adminId = adminLogin.json?.user?.id;
+  await loginAs("carol@testbuddy.local");
+  if (adminId) {
+    const mgrResetAdmin = await api(`/api/users/${adminId}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ newPassword: "password123" }),
+    });
+    if (mgrResetAdmin.res.status === 403) pass("Manager forbidden reset Admin password");
+    else fail("Manager forbidden reset Admin password", `status ${mgrResetAdmin.res.status}`);
+  } else {
+    fail("Manager forbidden reset Admin password", "no admin id");
+  }
+
+  const carolLogin = await api("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email: "carol@testbuddy.local", password: "password" }),
+  });
+  const carolId = carolLogin.json?.user?.id;
+  await loginAs("admin@testbuddy.local");
+  if (carolId) {
+    const adminResetMgr = await api(`/api/users/${carolId}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ newPassword: "password" }),
+    });
+    if (adminResetMgr.res.ok) pass("Admin reset Manager password");
+    else fail("Admin reset Manager password", adminResetMgr.text);
+  } else {
+    fail("Admin reset Manager password", "no carol id");
+  }
+
+  await loginAs("alice@testbuddy.local");
+  if (carolId) {
+    const testerReset = await api(`/api/users/${carolId}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ newPassword: "password123" }),
+    });
+    if (testerReset.res.status === 403) pass("Tester forbidden reset password");
+    else fail("Tester forbidden reset password", `status ${testerReset.res.status}`);
+  } else {
+    fail("Tester forbidden reset password", "no carol id");
+  }
+
+  const selfPw = await api("/api/auth/profile", {
+    method: "PUT",
+    body: JSON.stringify({
+      name: "Alice Tester",
+      currentPassword: "password",
+      newPassword: "password",
+    }),
+  });
+  if (selfPw.res.ok) pass("Tester change own password via profile");
+  else fail("Tester change own password via profile", selfPw.text);
+}
+
 async function testBugs() {
+  await loginAs("alice@testbuddy.local");
+
   const list = await api("/api/bugs");
   if (list.res.ok && Array.isArray(list.json)) pass("GET /api/bugs", `${list.json.length} bug(s)`);
   else fail("GET /api/bugs", list.text);
@@ -148,6 +499,7 @@ async function testBugs() {
     assigneeId,
     cycleId,
     projectId: createdProjectId,
+    moduleId: moduleId || undefined,
     status: "NEW",
     steps: [
       {
@@ -188,9 +540,125 @@ async function testBugs() {
     create.json?.screenshots?.length === 1
   ) {
     bugId = create.json.id;
-    pass("POST /api/bugs", `id=${bugId} screenshots=1`);
-  } else fail("POST /api/bugs", create.text);
+    pass("POST /api/bugs (Tester)", `id=${bugId} screenshots=1`);
+  } else fail("POST /api/bugs (Tester)", create.text);
 
+  // Developer cannot create bug
+  await loginAs("bob@testbuddy.local");
+  const devCreate = await api("/api/bugs", {
+    method: "POST",
+    body: JSON.stringify({ ...body, title: "Dev should fail" }),
+  });
+  if (devCreate.res.status === 403) pass("Developer forbidden create bug");
+  else fail("Developer forbidden create bug", `status ${devCreate.res.status}`);
+
+  // Developer status-only update + comment
+  const statusOnly = await api(`/api/bugs/${bugId}`, {
+    method: "PUT",
+    body: JSON.stringify({ status: "IN_PROGRESS" }),
+  });
+  if (statusOnly.res.ok && statusOnly.json?.status === "IN_PROGRESS") {
+    pass("Developer PUT status only");
+  } else fail("Developer PUT status only", statusOnly.text);
+
+  const fullDenied = await api(`/api/bugs/${bugId}`, {
+    method: "PUT",
+    body: JSON.stringify({ ...body, title: "Hacked", status: "FIXED" }),
+  });
+  if (fullDenied.res.status === 403) pass("Developer forbidden full bug update");
+  else fail("Developer forbidden full bug update", `status ${fullDenied.res.status}`);
+
+  const comment = await api(`/api/bugs/${bugId}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ body: "Looking into this" }),
+  });
+  if (comment.res.status === 201 && comment.json?.body) pass("Developer post comment");
+  else fail("Developer post comment", comment.text);
+
+  const comments = await api(`/api/bugs/${bugId}/comments`);
+  if (comments.res.ok && comments.json?.length >= 1) pass("GET bug comments");
+  else fail("GET bug comments", comments.text);
+
+  // Tester can comment + status + full field edit (not delete)
+  await loginAs("alice@testbuddy.local");
+  const testerComment = await api(`/api/bugs/${bugId}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ body: "Reproduced on staging" }),
+  });
+  if (testerComment.res.status === 201) pass("Tester post comment");
+  else fail("Tester post comment", testerComment.text);
+
+  const testerStatus = await api(`/api/bugs/${bugId}`, {
+    method: "PUT",
+    body: JSON.stringify({ status: "OPEN" }),
+  });
+  if (testerStatus.res.ok && testerStatus.json?.status === "OPEN") {
+    pass("Tester PUT status only");
+  } else fail("Tester PUT status only", testerStatus.text);
+
+  const testerUpdate = await api(`/api/bugs/${bugId}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      ...body,
+      title: "Tester edit",
+      description: "Updated by tester",
+      priority: "HIGH",
+      severity: "CRITICAL",
+      status: "OPEN",
+    }),
+  });
+  if (
+    testerUpdate.res.ok &&
+    testerUpdate.json?.title === "Tester edit" &&
+    testerUpdate.json?.priority === "HIGH" &&
+    testerUpdate.json?.severity === "CRITICAL"
+  ) {
+    pass("Tester full bug update");
+  } else fail("Tester full bug update", testerUpdate.text);
+
+  const testerDelete = await api(`/api/bugs/${bugId}`, { method: "DELETE" });
+  if (testerDelete.res.status === 403) pass("Tester forbidden delete bug");
+  else fail("Tester forbidden delete bug", `status ${testerDelete.res.status}`);
+
+  // Project members: SuperAdmin + Manager only
+  const usersList = await api("/api/users");
+  const bobId = usersList.json?.find((u) => u.role === "DEVELOPER")?.id;
+  if (bobId) {
+    await api(`/api/projects/${createdProjectId}/members/${bobId}`, { method: "DELETE" });
+    const addMem = await api(`/api/projects/${createdProjectId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ userId: bobId }),
+    });
+    if (addMem.res.status === 403) pass("Tester forbidden add project member");
+    else fail("Tester forbidden add project member", `status ${addMem.res.status}`);
+  } else {
+    fail("Tester forbidden add project member", "no developer user found");
+  }
+
+  await loginAs("admin@testbuddy.local");
+  if (bobId) {
+    const adminAdd = await api(`/api/projects/${createdProjectId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ userId: bobId }),
+    });
+    if (adminAdd.res.status === 403) pass("Admin forbidden add project member");
+    else fail("Admin forbidden add project member", `status ${adminAdd.res.status}`);
+  } else {
+    fail("Admin forbidden add project member", "no developer user found");
+  }
+
+  await loginAs("carol@testbuddy.local");
+  if (bobId) {
+    const mgrAdd = await api(`/api/projects/${createdProjectId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ userId: bobId }),
+    });
+    if (mgrAdd.res.status === 201 || mgrAdd.res.ok) pass("Manager add project member (demo project)");
+    else fail("Manager add project member (demo project)", mgrAdd.text);
+  }
+
+  // Admin full update
+  await loginAs("admin@testbuddy.local");
   const get = await api(`/api/bugs/${bugId}`);
   if (get.res.ok && get.json?.steps?.[1]?.screenshotId === shotId) pass("GET /api/bugs/:id");
   else fail("GET /api/bugs/:id", get.text);
@@ -208,8 +676,8 @@ async function testBugs() {
     method: "PUT",
     body: JSON.stringify({ ...body, title: "Regression bug updated", status: "OPEN" }),
   });
-  if (update.res.ok && update.json?.status === "OPEN") pass("PUT /api/bugs/:id");
-  else fail("PUT /api/bugs/:id", update.text);
+  if (update.res.ok && update.json?.status === "OPEN") pass("PUT /api/bugs/:id (Admin)");
+  else fail("PUT /api/bugs/:id (Admin)", update.text);
 
   const exportAll = await api("/api/bugs/export/json");
   if (exportAll.res.ok && exportAll.json?.bugs?.length >= 1) {
@@ -220,6 +688,7 @@ async function testBugs() {
   if (exportOne.res.ok && exportOne.json?.count === 1) pass("GET /api/bugs/:id/export/json");
   else fail("GET /api/bugs/:id/export/json", exportOne.text);
 
+  await loginAs("alice@testbuddy.local");
   const importRes = await api("/api/bugs/import", {
     method: "POST",
     body: JSON.stringify({
@@ -245,6 +714,15 @@ async function testBugs() {
   if (filter.res.ok && filter.json.some((b) => b.id === bugId)) {
     pass("GET /api/bugs filters");
   } else fail("GET /api/bugs filters", filter.text);
+
+  if (moduleId) {
+    const byMod = await api(`/api/bugs?projectId=${createdProjectId}&moduleId=${moduleId}`);
+    if (byMod.res.ok && Array.isArray(byMod.json) && byMod.json.some((b) => b.id === bugId)) {
+      pass("GET /api/bugs moduleId filter");
+    } else fail("GET /api/bugs moduleId filter", byMod.text);
+  } else {
+    fail("GET /api/bugs moduleId filter", "no moduleId from setup");
+  }
 
   const badRefs = await api("/api/bugs", {
     method: "POST",
@@ -275,7 +753,8 @@ async function testAuthGuards() {
 }
 
 async function testCleanup() {
-  // DELETE bug
+  await loginAs("admin@testbuddy.local");
+
   if (bugId) {
     const delBug = await api(`/api/bugs/${bugId}`, { method: "DELETE" });
     if (delBug.res.status === 204) pass("DELETE /api/bugs/:id");
@@ -285,18 +764,21 @@ async function testCleanup() {
     else fail("Deleted bug returns 404", `status ${gone.res.status}`);
   }
 
-  // Cascade: project with remaining bugs (if any) still deletes
   const withBugs = await api("/api/projects", {
     method: "POST",
-    body: JSON.stringify({ name: `Cascade ${Date.now()}` }),
+    body: JSON.stringify({
+      name: `Cascade ${Date.now()}`,
+      organizationId,
+    }),
   });
   const cascadeId = withBugs.json?.id;
   if (cascadeId) {
     const cycles = await api(`/api/cycles?projectId=${cascadeId}`);
-    const cycleId = cycles.json?.[0]?.id;
+    const cId = cycles.json?.[0]?.id;
     const users = await api("/api/users");
-    const assigneeId = users.json?.[0]?.id;
-    if (cycleId && assigneeId) {
+    const aId = users.json?.[0]?.id;
+    if (cId && aId) {
+      await loginAs("alice@testbuddy.local");
       await api("/api/bugs", {
         method: "POST",
         body: JSON.stringify({
@@ -304,23 +786,26 @@ async function testCleanup() {
           description: "temp",
           priority: "MEDIUM",
           severity: "MINOR",
-          assigneeId,
-          cycleId,
+          assigneeId: aId,
+          cycleId: cId,
           projectId: cascadeId,
           status: "NEW",
           steps: [],
         }),
       });
+      await loginAs("admin@testbuddy.local");
     }
     const delCascade = await api(`/api/projects/${cascadeId}`, { method: "DELETE" });
     if (delCascade.res.status === 204) pass("DELETE /api/projects cascades bugs");
     else fail("DELETE /api/projects cascades bugs", `status ${delCascade.res.status}`);
   }
 
-  // Empty project delete
   const empty = await api("/api/projects", {
     method: "POST",
-    body: JSON.stringify({ name: `Empty ${Date.now()}` }),
+    body: JSON.stringify({
+      name: `Empty ${Date.now()}`,
+      organizationId,
+    }),
   });
   const emptyId = empty.json?.id;
   if (emptyId) {
@@ -329,7 +814,6 @@ async function testCleanup() {
     else fail("DELETE /api/projects empty", `status ${del.res.status}`);
   }
 
-  // Cleanup created project from earlier tests (may still have bugs)
   if (createdProjectId) {
     const delProj = await api(`/api/projects/${createdProjectId}`, { method: "DELETE" });
     if (delProj.res.status === 204) pass("DELETE /api/projects cleanup");
@@ -390,6 +874,11 @@ async function testExtensionArtifacts() {
     else fail("extension zip packaged", "too small");
   } else fail("extension zip packaged", "missing");
 
+  const popupJs = fs.readFileSync(path.join(distPath, "popup.js"), "utf8");
+  if (popupJs.includes("fetchModules") || popupJs.includes("/modules")) {
+    pass("extension popup modules support");
+  } else fail("extension popup modules support", "modules fetch not found");
+
   const popupHtml = fs.readFileSync(path.join(distPath, "popup.html"), "utf8");
   if (popupHtml.includes("./popup.js") && !popupHtml.includes('src="/popup.js"')) {
     pass("extension popup relative paths");
@@ -425,6 +914,8 @@ async function main() {
     await testAuth();
     await testAuthGuards();
     await testCatalog();
+    await testOrgRbac();
+    await testRoleTransfer();
     await testBugs();
     await testExtensionDownload();
     await testCleanup();

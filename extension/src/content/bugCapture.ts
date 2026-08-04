@@ -86,10 +86,12 @@ export function buildObservationFromOverview(args: {
     selector: "[data-testbuddy-highlight]",
     pageUrl: args.pageUrl,
     screenshotId: args.screenshotId,
-    description: `Inspected the highlighted region on the page and reviewed the defect`,
+    description: overview
+      ? `Reviewed the highlighted region and confirmed the defect: ${boldData(short)}`
+      : `Reviewed the highlighted region on the page and confirmed the defect`,
     actualResult: overview
       ? `Observed defect: ${boldData(overview)}`
-      : `Defect was marked on the highlighted screenshot region`,
+      : `A defect was marked on the highlighted screenshot region`,
     expectedResult: buildExpectedForDefect(overview),
   };
 }

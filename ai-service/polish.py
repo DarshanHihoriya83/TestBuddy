@@ -5,15 +5,10 @@ Falls back to a strong local template if no API key is configured.
 
 from __future__ import annotations
 
-import json
-import os
 import re
 from typing import Any, Literal
 
-import httpx
-from dotenv import load_dotenv
-
-load_dotenv()
+from llm import chat_json
 
 Mode = Literal["both", "title", "description"]
 
@@ -49,94 +44,6 @@ Rules:
 - Keep a calm, factual QA tone — not marketing fluff
 - Return ONLY valid JSON with keys "title" and "description" (no markdown fences)
 """
-
-
-def _provider() -> str:
-    explicit = (os.getenv("LLM_PROVIDER") or "").strip().lower()
-    if explicit in {"groq", "openai", "anthropic", "claude"}:
-        return "anthropic" if explicit == "claude" else explicit
-    if os.getenv("GROQ_API_KEY"):
-        return "groq"
-    if os.getenv("OPENAI_API_KEY"):
-        return "openai"
-    if os.getenv("ANTHROPIC_API_KEY"):
-        return "anthropic"
-    return "none"
-
-
-def _extract_json(text: str) -> dict[str, Any]:
-    text = text.strip()
-    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
-    if fence:
-        text = fence.group(1).strip()
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
-    start = text.find("{")
-    end = text.rfind("}")
-    if start >= 0 and end > start:
-        data = json.loads(text[start : end + 1])
-        if isinstance(data, dict):
-            return data
-    raise ValueError("Model did not return valid JSON")
-
-
-async def _call_openai_compatible(
-    *,
-    base_url: str,
-    api_key: str,
-    model: str,
-    user_content: str,
-) -> str:
-    payload = {
-        "model": model,
-        "temperature": 0.35,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ],
-        "response_format": {"type": "json_object"},
-    }
-    async with httpx.AsyncClient(timeout=45.0) as client:
-        res = await client.post(
-            f"{base_url.rstrip('/')}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-        res.raise_for_status()
-        data = res.json()
-        return data["choices"][0]["message"]["content"]
-
-
-async def _call_anthropic(*, api_key: str, model: str, user_content: str) -> str:
-    payload = {
-        "model": model,
-        "max_tokens": 1024,
-        "temperature": 0.35,
-        "system": SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": user_content}],
-    }
-    async with httpx.AsyncClient(timeout=45.0) as client:
-        res = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
-        res.raise_for_status()
-        data = res.json()
-        parts = data.get("content") or []
-        text = "".join(p.get("text", "") for p in parts if p.get("type") == "text")
-        return text
 
 
 def _local_fallback(title: str, description: str) -> dict[str, str]:
@@ -246,58 +153,21 @@ async def polish_bug_copy(
         "Return JSON: {\"title\": \"...\", \"description\": \"...\"}"
     )
 
-    provider = _provider()
-    used = "local-fallback"
-    raw_model = ""
-
-    try:
-        if provider == "groq":
-            key = os.getenv("GROQ_API_KEY", "")
-            model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-            raw_model = await _call_openai_compatible(
-                base_url="https://api.groq.com/openai/v1",
-                api_key=key,
-                model=model,
-                user_content=user_content,
-            )
-            used = f"groq:{model}"
-        elif provider == "openai":
-            key = os.getenv("OPENAI_API_KEY", "")
-            model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-            base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-            raw_model = await _call_openai_compatible(
-                base_url=base,
-                api_key=key,
-                model=model,
-                user_content=user_content,
-            )
-            used = f"openai:{model}"
-        elif provider == "anthropic":
-            key = os.getenv("ANTHROPIC_API_KEY", "")
-            model = os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-latest")
-            raw_model = await _call_anthropic(api_key=key, model=model, user_content=user_content)
-            used = f"anthropic:{model}"
-        else:
-            result = _local_fallback(title, description)
-            return {**result, "provider": used, "ai": False}
-    except Exception as exc:  # noqa: BLE001 — fall back gracefully
-        result = _local_fallback(title, description)
-        return {
-            **result,
-            "provider": "local-fallback",
-            "ai": False,
-            "warning": f"LLM call failed ({provider}): {exc}",
-        }
-
-    data = _extract_json(raw_model)
-    out_title = str(data.get("title") or "").strip() or _local_fallback(title, description)["title"]
-    out_desc = (
-        str(data.get("description") or "").strip()
-        or _local_fallback(title, description)["description"]
+    data, used, ai, warning = await chat_json(
+        system_prompt=SYSTEM_PROMPT,
+        user_content=user_content,
+        temperature=0.35,
     )
 
+    if not ai:
+        result = _local_fallback(title, description)
+        return {**result, "provider": used, "ai": False, "warning": warning}
+
+    local = _local_fallback(title, description)
+    out_title = str(data.get("title") or "").strip() or local["title"]
+    out_desc = str(data.get("description") or "").strip() or local["description"]
+
     if mode == "title":
-        # Keep caller's description unless empty
         if description:
             out_desc = description
     elif mode == "description":
@@ -309,4 +179,5 @@ async def polish_bug_copy(
         "description": out_desc,
         "provider": used,
         "ai": True,
+        "warning": warning,
     }

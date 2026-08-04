@@ -13,6 +13,9 @@ export interface BugDraftMeta {
   assigneeId: string;
   cycleId: string;
   projectId: string;
+  moduleId?: string;
+  /** Display name for on-page toolbar */
+  moduleName?: string;
 }
 
 export interface RecordingSession {
@@ -44,6 +47,17 @@ export type ExtensionMessage =
   | { type: "RESUME_RECORDING" }
   | { type: "STOP_RECORDING" }
   | { type: "CLEAR_RECORDING" }
+  | { type: "PATCH_RECORDING_META"; meta: Partial<BugDraftMeta> }
+  | { type: "UPLOAD_BUG" }
+  | {
+      type: "PATCH_STEP_TEXTS";
+      steps: Array<{
+        order: number;
+        description?: string;
+        actualResult?: string;
+        expectedResult?: string;
+      }>;
+    }
   | { type: "ADD_STEP"; step: Omit<Step, "order"> }
   | { type: "CONTENT_READY" }
   | { type: "CAPTURE_VISIBLE_TAB" }
@@ -56,5 +70,5 @@ export type ExtensionMessage =
     };
 
 export type ExtensionResponse =
-  | { ok: true; session: RecordingSession; dataUrl?: string }
+  | { ok: true; session: RecordingSession; dataUrl?: string; bugId?: string; message?: string }
   | { ok: false; error: string };

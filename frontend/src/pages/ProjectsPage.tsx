@@ -1,18 +1,37 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { useState } from "react";
-import { createProject, deleteProject, fetchProjects } from "../api";
+import { createProject, deleteProject, fetchOrganizations, fetchProjects } from "../api";
+import { useAuth } from "../auth";
+import { QueryStatus } from "../components/QueryStatus";
 import { Shell } from "../components/Shell";
+import { queryKeys } from "../queryKeys";
+import { canCreateProject } from "../utils/roles";
 import { validateName, validateOptionalUrl } from "../utils/validation";
+
 export function ProjectsPage() {
+  const { user } = useAuth();
+  const canManage = canCreateProject(user);
   const queryClient = useQueryClient();
-  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: fetchProjects });
+  const projectsQuery = useQuery({
+    queryKey: queryKeys.projects(),
+    queryFn: () => fetchProjects(),
+  });
+  const orgsQuery = useQuery({
+    queryKey: queryKeys.organizations,
+    queryFn: fetchOrganizations,
+    enabled: canManage,
+  });
   const [name, setName] = useState("");
+  const [organizationId, setOrganizationId] = useState("");
   const [jiraProjectKey, setJiraProjectKey] = useState("");
   const [adoOrgUrl, setAdoOrgUrl] = useState("");
   const [adoProject, setAdoProject] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  const orgs = orgsQuery.data ?? [];
+  const defaultOrgId = organizationId || orgs[0]?.id || "";
 
   const createMutation = useMutation({
     mutationFn: createProject,
@@ -24,6 +43,7 @@ export function ProjectsPage() {
       setMessage("Project created (Cycle 1 added as default)");
       setError(null);
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      await queryClient.invalidateQueries({ queryKey: ["organizations"] });
     },
     onError: (err: Error) => {
       setError(err.message);
@@ -37,6 +57,7 @@ export function ProjectsPage() {
       setMessage("Project deleted");
       setError(null);
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      await queryClient.invalidateQueries({ queryKey: ["organizations"] });
     },
     onError: (err: Error) => {
       setError(err.message);
@@ -47,101 +68,127 @@ export function ProjectsPage() {
   return (
     <Shell title="Projects">
       <p className="mb-6 text-sm text-[var(--muted)]">
-        Create, view, edit, and delete TestBuddy projects.
+        {canManage
+          ? "Create projects under an organization (Admin or Manager)."
+          : "Browse projects in your organizations."}
       </p>
 
-      <form
-        className="tb-card tb-card-accent mb-8 p-5"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const nameErr = validateName(name);
-          if (nameErr) {
-            setError(nameErr);
-            setMessage(null);
-            return;
-          }
-          const urlErr = validateOptionalUrl(adoOrgUrl, "Azure DevOps org URL");
-          if (urlErr) {
-            setError(urlErr);
-            setMessage(null);
-            return;
-          }
-          createMutation.mutate({
-            name: name.trim(),
-            jiraProjectKey: jiraProjectKey.trim() || undefined,
-            adoOrgUrl: adoOrgUrl.trim() || undefined,
-            adoProject: adoProject.trim() || undefined,
-          });
-        }}
-      >
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--accent)]">
-          Create project
-        </h3>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <label className="tb-label">
-            Name *
-            <input
-              className="tb-input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              minLength={2}
-            />
-          </label>
-          <label className="tb-label">
-            Jira project key
-            <input
-              className="tb-input"
-              value={jiraProjectKey}
-              onChange={(e) => setJiraProjectKey(e.target.value)}
-              placeholder="e.g. TB"
-            />
-          </label>
-          <label className="tb-label">
-            Azure DevOps org URL
-            <input
-              className="tb-input"
-              value={adoOrgUrl}
-              onChange={(e) => setAdoOrgUrl(e.target.value)}
-              placeholder="https://dev.azure.com/org"
-            />
-          </label>
-          <label className="tb-label">
-            Azure DevOps project
-            <input
-              className="tb-input"
-              value={adoProject}
-              onChange={(e) => setAdoProject(e.target.value)}
-            />
-          </label>
-        </div>
-        {(error || message) && (
-          <p className={`mt-4 ${error ? "tb-alert-error" : "tb-alert-success"}`}>
-            {error || message}
-          </p>
-        )}
-        <button
-          type="submit"
-          disabled={createMutation.isPending || !name.trim()}
-          className="tb-btn-primary mt-4"
+      {canManage && (
+        <form
+          className="tb-card tb-card-accent mb-8 p-5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const nameErr = validateName(name);
+            if (nameErr) {
+              setError(nameErr);
+              setMessage(null);
+              return;
+            }
+            const orgId = organizationId || orgs[0]?.id;
+            if (!orgId) {
+              setError("Select an organization");
+              setMessage(null);
+              return;
+            }
+            const urlErr = validateOptionalUrl(adoOrgUrl, "Azure DevOps org URL");
+            if (urlErr) {
+              setError(urlErr);
+              setMessage(null);
+              return;
+            }
+            createMutation.mutate({
+              name: name.trim(),
+              organizationId: orgId,
+              jiraProjectKey: jiraProjectKey.trim() || undefined,
+              adoOrgUrl: adoOrgUrl.trim() || undefined,
+              adoProject: adoProject.trim() || undefined,
+            });
+          }}
         >
-          {createMutation.isPending ? "Creating…" : "Create project"}
-        </button>
-      </form>
-
-      {projectsQuery.isLoading && <p className="text-sm text-[var(--muted)]">Loading projects…</p>}
-      {projectsQuery.error && (
-        <div className="tb-alert-error mb-4 flex flex-wrap items-center justify-between gap-3">
-          <span>{(projectsQuery.error as Error).message}</span>
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--accent)]">
+            Create project
+          </h3>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <label className="tb-label">
+              Organization *
+              <select
+                className="tb-select"
+                value={defaultOrgId}
+                onChange={(e) => setOrganizationId(e.target.value)}
+                required
+              >
+                {orgs.length === 0 && <option value="">No organizations</option>}
+                {orgs.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="tb-label">
+              Name *
+              <input
+                className="tb-input"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                minLength={2}
+              />
+            </label>
+            <label className="tb-label">
+              Jira project key
+              <input
+                className="tb-input"
+                value={jiraProjectKey}
+                onChange={(e) => setJiraProjectKey(e.target.value)}
+                placeholder="e.g. TB"
+              />
+            </label>
+            <label className="tb-label">
+              Azure DevOps org URL
+              <input
+                className="tb-input"
+                value={adoOrgUrl}
+                onChange={(e) => setAdoOrgUrl(e.target.value)}
+                placeholder="https://dev.azure.com/org"
+              />
+            </label>
+            <label className="tb-label md:col-span-2">
+              Azure DevOps project
+              <input
+                className="tb-input"
+                value={adoProject}
+                onChange={(e) => setAdoProject(e.target.value)}
+              />
+            </label>
+          </div>
+          {(error || message) && (
+            <p className={`mt-4 ${error ? "tb-alert-error" : "tb-alert-success"}`}>
+              {error || message}
+            </p>
+          )}
           <button
-            type="button"
-            className="tb-btn-ghost bg-white px-3 py-1 text-xs"
-            onClick={() => void projectsQuery.refetch()}
+            type="submit"
+            disabled={createMutation.isPending || !name.trim() || !orgs.length}
+            className="tb-btn-primary mt-4"
           >
-            Retry
+            {createMutation.isPending ? "Creating…" : "Create project"}
           </button>
-        </div>
+        </form>
       )}
+
+      {(error || message) && !canManage && (
+        <p className={`mb-4 ${error ? "tb-alert-error" : "tb-alert-success"}`}>
+          {error || message}
+        </p>
+      )}
+
+      <QueryStatus
+        isLoading={projectsQuery.isLoading}
+        error={projectsQuery.error}
+        onRetry={() => void projectsQuery.refetch()}
+        loadingText="Loading projects…"
+      />
 
       <div className="tb-table-wrap">
         <table className="tb-table">
@@ -157,7 +204,7 @@ export function ProjectsPage() {
             {projectsQuery.data?.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-4 py-8 text-center text-[var(--muted)]">
-                  No projects yet. Create one above.
+                  No projects yet.
                 </td>
               </tr>
             )}
@@ -175,28 +222,32 @@ export function ProjectsPage() {
                     <Link to={`/projects/${project.id}`} className="tb-btn-ghost px-2.5 py-1 text-xs">
                       View
                     </Link>
-                    <Link
-                      to={`/projects/${project.id}/edit`}
-                      className="tb-btn-ghost px-2.5 py-1 text-xs"
-                    >
-                      Edit
-                    </Link>
-                    <button
-                      type="button"
-                      className="rounded-lg border border-red-900/50 px-2.5 py-1 text-xs text-[var(--danger)] hover:bg-[var(--danger-soft)]"
-                      disabled={deleteMutation.isPending}
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            `Delete project "${project.name}"? This also deletes all bugs in the project.`,
-                          )
-                        ) {
-                          deleteMutation.mutate(project.id);
-                        }
-                      }}
-                    >
-                      Delete
-                    </button>
+                    {canManage && (
+                      <>
+                        <Link
+                          to={`/projects/${project.id}/edit`}
+                          className="tb-btn-ghost px-2.5 py-1 text-xs"
+                        >
+                          Edit
+                        </Link>
+                        <button
+                          type="button"
+                          className="rounded-lg border border-red-900/50 px-2.5 py-1 text-xs text-[var(--danger)] hover:bg-[var(--danger-soft)]"
+                          disabled={deleteMutation.isPending}
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `Delete project "${project.name}"? This also deletes all bugs in the project.`,
+                              )
+                            ) {
+                              deleteMutation.mutate(project.id);
+                            }
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>

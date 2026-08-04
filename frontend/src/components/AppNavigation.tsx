@@ -1,14 +1,19 @@
 import { Link, useLocation } from "react-router-dom";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "../auth";
+import { canTransferRoles, isSuperAdmin, roleLabel } from "../utils/roles";
 
 const NAV_DRAWER_ID = "testbuddy-nav-drawer";
 
-const NAV = [
+const BASE_NAV = [
   { to: "/", label: "Home", match: (path: string) => path === "/" },
   { to: "/projects", label: "Projects", match: (path: string) => path.startsWith("/projects") },
   { to: "/bugs", label: "Bugs", match: (path: string) => path.startsWith("/bugs") },
-  { to: "/profile", label: "Profile", match: (path: string) => path.startsWith("/profile") },
+  {
+    to: "/settings",
+    label: "Settings",
+    match: (path: string) => path.startsWith("/settings") || path.startsWith("/profile"),
+  },
 ] as const;
 
 type NavContextValue = {
@@ -95,6 +100,30 @@ export function NavDrawer() {
   const location = useLocation();
   const { navOpen, closeNav } = useNav();
 
+  const navItems = useMemo(() => {
+    const items: { to: string; label: string; match: (path: string) => boolean }[] = [
+      ...BASE_NAV,
+    ];
+    // After Home — SuperAdmin only
+    if (isSuperAdmin(user)) {
+      items.splice(1, 0, {
+        to: "/organizations",
+        label: "Organizations",
+        match: (path: string) => path.startsWith("/organizations"),
+      });
+    }
+    // Before Settings — role-transfer roles
+    if (canTransferRoles(user)) {
+      const settingsIdx = items.findIndex((i) => i.to === "/settings");
+      items.splice(settingsIdx >= 0 ? settingsIdx : items.length, 0, {
+        to: "/users",
+        label: "Users",
+        match: (path: string) => path.startsWith("/users"),
+      });
+    }
+    return items;
+  }, [user]);
+
   const initials =
     user?.name
       ?.split(/\s+/)
@@ -138,7 +167,7 @@ export function NavDrawer() {
           <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
             Menu
           </p>
-          {NAV.map((item) => {
+          {navItems.map((item) => {
             const active = item.match(location.pathname);
             return (
               <Link
@@ -170,7 +199,7 @@ export function NavDrawer() {
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-[var(--ink)]">{user.name}</p>
-                  <p className="truncate text-xs text-[var(--muted)]">{user.role}</p>
+                  <p className="truncate text-xs text-[var(--muted)]">{roleLabel(user.role)}</p>
                 </div>
               </Link>
               <button type="button" onClick={logout} className="tb-btn-ghost mt-3 w-full text-sm">

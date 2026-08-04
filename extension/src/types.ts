@@ -1,4 +1,4 @@
-export type UserRole = "ADMIN" | "TESTER" | "DEVELOPER" | "MANAGER";
+export type UserRole = "SUPERADMIN" | "ADMIN" | "TESTER" | "DEVELOPER" | "MANAGER";
 export type BugPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type BugSeverity = "MINOR" | "MAJOR" | "CRITICAL" | "BLOCKER";
 export type BugStatus =
@@ -60,6 +60,12 @@ export interface Step {
   screenshotId?: string;
 }
 
+export interface Module {
+  id: string;
+  projectId: string;
+  name: string;
+}
+
 export interface Bug {
   id: string;
   title: string;
@@ -70,6 +76,7 @@ export interface Bug {
   reporterId: string;
   cycleId: string;
   projectId: string;
+  moduleId?: string | null;
   status: BugStatus;
   steps: Step[];
   screenshots?: {
@@ -92,6 +99,7 @@ export interface BugCreateRequest {
   assigneeId: string;
   cycleId: string;
   projectId: string;
+  moduleId?: string;
   status?: BugStatus;
   steps?: Step[];
   screenshots?: {

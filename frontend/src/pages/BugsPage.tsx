@@ -1,17 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteBug,
   exportBugsJson,
   fetchBugs,
   fetchCycles,
+  fetchModules,
   fetchProjects,
   fetchUsers,
   importBugs,
 } from "../api";
-import type { Bug, BugFilters, BugPriority, BugSeverity, BugStatus } from "../types";
+import { useAuth } from "../auth";
+import { BugListRow, BUG_TABLE_GRID } from "../components/BugListRow";
+import { FlashAlert } from "../components/FlashAlert";
+import { PageHeader } from "../components/PageHeader";
+import { QueryStatus } from "../components/QueryStatus";
 import { Shell } from "../components/Shell";
+import { queryKeys } from "../queryKeys";
+import type { Bug, BugFilters, BugPriority, BugSeverity, BugStatus } from "../types";
+import { canCreateBug, canDeleteBug } from "../utils/roles";
 
 function downloadJson(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -38,41 +46,53 @@ function toImportPayload(bugs: Bug[]) {
 }
 
 export function BugsPage() {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const fileRef = useRef<HTMLInputElement>(null);
+  const canImport = canCreateBug(user);
+  const canDelete = canDeleteBug(user);
+  const showCycleFilter = user?.role !== "TESTER";
   const [filters, setFilters] = useState<BugFilters>({
-    projectId: "",
+    projectId: searchParams.get("projectId") ?? "",
     priority: "",
     severity: "",
     assigneeId: "",
     cycleId: "",
     status: "",
+    moduleId: "",
   });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const usersQuery = useQuery({ queryKey: ["users"], queryFn: fetchUsers });
-  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: fetchProjects });
+  useEffect(() => {
+    const fromUrl = searchParams.get("projectId") ?? "";
+    setFilters((f) => (f.projectId === fromUrl ? f : { ...f, projectId: fromUrl, cycleId: "", moduleId: "" }));
+  }, [searchParams]);
+
+  const usersQuery = useQuery({ queryKey: queryKeys.users(), queryFn: () => fetchUsers() });
+  const projectsQuery = useQuery({ queryKey: queryKeys.projects(), queryFn: () => fetchProjects() });
   const projectId = filters.projectId || undefined;
   const cyclesQuery = useQuery({
-    queryKey: ["cycles", projectId],
+    queryKey: queryKeys.cycles(projectId || "_"),
     queryFn: () => fetchCycles(projectId!),
     enabled: !!projectId,
   });
-  const allCyclesQuery = useQuery({
-    queryKey: ["cycles-all", projectsQuery.data?.map((p) => p.id).join(",")],
-    queryFn: async () => {
-      const projects = projectsQuery.data ?? [];
-      const batches = await Promise.all(projects.map((p) => fetchCycles(p.id)));
-      return batches.flat();
-    },
-    enabled: !projectId && !!projectsQuery.data?.length,
+  const modulesQuery = useQuery({
+    queryKey: queryKeys.modules(projectId || "_"),
+    queryFn: () => fetchModules(projectId!),
+    enabled: !!projectId,
   });
   const bugsQuery = useQuery({
-    queryKey: ["bugs", filters],
+    queryKey: queryKeys.bugs(filters),
     queryFn: () => fetchBugs(filters),
   });
+
+  const projectNameById = useMemo(() => {
+    const map = new Map(projectsQuery.data?.map((p) => [p.id, p.name]));
+    return (id: string) => map.get(id) ?? id.slice(0, 8);
+  }, [projectsQuery.data]);
 
   const deleteMutation = useMutation({
     mutationFn: deleteBug,
@@ -93,10 +113,9 @@ export function BugsPage() {
   }, [usersQuery.data]);
 
   const cycleName = useMemo(() => {
-    const cycles = projectId ? cyclesQuery.data : allCyclesQuery.data;
-    const map = new Map(cycles?.map((c) => [c.id, c.name]));
+    const map = new Map(cyclesQuery.data?.map((c) => [c.id, c.name]));
     return (id: string) => map.get(id) ?? id.slice(0, 8);
-  }, [projectId, cyclesQuery.data, allCyclesQuery.data]);
+  }, [cyclesQuery.data]);
 
   async function onExport() {
     setBusy(true);
@@ -104,10 +123,7 @@ export function BugsPage() {
     setMessage(null);
     try {
       const data = await exportBugsJson(filters);
-      downloadJson(
-        `testbuddy-bugs-${new Date().toISOString().slice(0, 10)}.json`,
-        data,
-      );
+      downloadJson(`testbuddy-bugs-${new Date().toISOString().slice(0, 10)}.json`, data);
       setMessage(`Exported ${data.count} bug(s)`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Export failed");
@@ -138,53 +154,68 @@ export function BugsPage() {
     }
   }
 
+  const bugs = bugsQuery.data ?? [];
+  const hasFilters = Object.values(filters).some((v) => !!v);
+
   return (
     <Shell title="Bugs">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-[var(--muted)]">
-          Filter, export, or import bugs as JSON.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void onExport()}
-            className="tb-btn-ghost text-sm disabled:opacity-60"
-          >
-            Export JSON
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => fileRef.current?.click()}
-            className="tb-btn-primary text-sm disabled:opacity-60"
-          >
-            Import JSON
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/json,.json"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void onImportFile(file);
-            }}
-          />
-        </div>
-      </div>
+      <PageHeader
+        description="Filter, export, or import bugs as JSON."
+        actions={
+          <>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void onExport()}
+              className="tb-btn-ghost text-sm disabled:opacity-60"
+            >
+              Export JSON
+            </button>
+            {canImport ? (
+              <>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => fileRef.current?.click()}
+                  className="tb-btn-primary text-sm disabled:opacity-60"
+                >
+                  Import JSON
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void onImportFile(file);
+                  }}
+                />
+              </>
+            ) : null}
+          </>
+        }
+      />
 
-      {error && <p className="tb-alert-error mb-4">{error}</p>}
-      {message && <p className="tb-alert-success mb-4">{message}</p>}
+      <FlashAlert error={error} message={message} />
 
-      <div className="mb-6 grid gap-3 md:grid-cols-3 lg:grid-cols-6">
+      <div
+        className={`mb-6 grid gap-3 md:grid-cols-3 ${
+          showCycleFilter ? "lg:grid-cols-7" : "lg:grid-cols-6"
+        }`}
+      >
         <label className="tb-label">
           Project
           <select
             className="tb-select"
             value={filters.projectId ?? ""}
             onChange={(e) =>
-              setFilters((f) => ({ ...f, projectId: e.target.value, cycleId: "" }))
+              setFilters((f) => ({
+                ...f,
+                projectId: e.target.value,
+                cycleId: "",
+                moduleId: "",
+              }))
             }
           >
             <option value="">All</option>
@@ -228,90 +259,128 @@ export function BugsPage() {
             ))}
           </select>
         </label>
+        {showCycleFilter ? (
+          <label className="tb-label">
+            Cycle
+            <select
+              className="tb-select disabled:cursor-not-allowed disabled:opacity-60"
+              value={filters.cycleId ?? ""}
+              disabled={!filters.projectId}
+              onChange={(e) => setFilters((f) => ({ ...f, cycleId: e.target.value }))}
+            >
+              <option value="">{filters.projectId ? "All" : "Select a project first"}</option>
+              {cyclesQuery.data?.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <label className="tb-label">
-          Cycle
+          Module
           <select
             className="tb-select disabled:cursor-not-allowed disabled:opacity-60"
-            value={filters.cycleId ?? ""}
+            value={filters.moduleId ?? ""}
             disabled={!filters.projectId}
-            onChange={(e) => setFilters((f) => ({ ...f, cycleId: e.target.value }))}
+            onChange={(e) => setFilters((f) => ({ ...f, moduleId: e.target.value }))}
           >
             <option value="">{filters.projectId ? "All" : "Select a project first"}</option>
-            {cyclesQuery.data?.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
+            {modulesQuery.data?.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
               </option>
             ))}
           </select>
         </label>
       </div>
 
-      {bugsQuery.isLoading && <p className="text-sm text-[var(--muted)]">Loading bugs…</p>}
-      {bugsQuery.error && (
-        <div className="tb-alert-error mb-4 flex flex-wrap items-center justify-between gap-3">
-          <span>{(bugsQuery.error as Error).message}</span>
-          <button
-            type="button"
-            className="tb-btn-ghost bg-white px-3 py-1 text-xs"
-            onClick={() => void bugsQuery.refetch()}
-          >
-            Retry
-          </button>
+      <QueryStatus
+        isLoading={bugsQuery.isLoading}
+        error={bugsQuery.error}
+        onRetry={() => void bugsQuery.refetch()}
+        loadingText="Loading bugs…"
+      />
+
+      {!bugsQuery.isLoading && !bugsQuery.error && bugs.length === 0 && (
+        <div className="tb-card border-dashed p-8 text-center">
+          <p className="font-medium text-[var(--ink)]">
+            {hasFilters ? "No bugs match these filters" : "No bugs yet"}
+          </p>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            {hasFilters
+              ? "Clear filters or pick another project."
+              : "File one from the TestBuddy extension popup."}
+          </p>
+          {hasFilters ? (
+            <button
+              type="button"
+              className="tb-btn-ghost mt-4 text-xs"
+              onClick={() =>
+                setFilters({
+                  projectId: "",
+                  priority: "",
+                  severity: "",
+                  assigneeId: "",
+                  cycleId: "",
+                  status: "",
+                  moduleId: "",
+                })
+              }
+            >
+              Clear filters
+            </button>
+          ) : null}
         </div>
       )}
 
-      <div className="tb-table-wrap">
-        <table className="tb-table">
-          <thead>
-            <tr>
-              <th className="px-4 py-3">Title</th>
-              <th className="px-4 py-3">Priority</th>
-              <th className="px-4 py-3">Severity</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Assignee</th>
-              <th className="px-4 py-3">Cycle</th>
-              <th className="px-4 py-3">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {bugsQuery.data?.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-[var(--muted)]">
-                  No bugs yet. File one from the extension popup.
-                </td>
-              </tr>
-            )}
-            {bugsQuery.data?.map((bug) => (
-              <tr key={bug.id}>
-                <td className="px-4 py-3">
-                  <Link className="tb-link font-medium" to={`/bugs/${bug.id}`}>
-                    {bug.title}
+      {bugs.length > 0 && (
+        <div className="tb-card overflow-hidden">
+          <div
+            className={`hidden border-b border-[var(--line)] bg-slate-50/80 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)] md:grid ${BUG_TABLE_GRID}`}
+          >
+            <span aria-hidden />
+            <span>ID</span>
+            <span aria-hidden />
+            <span>Title</span>
+            <span>Assignee</span>
+            <span>Status</span>
+            <span>Priority</span>
+            <span>Activity</span>
+            <span className="text-right">Cycle / Project</span>
+          </div>
+          {bugs.map((bug) => (
+            <BugListRow
+              key={bug.id}
+              bug={bug}
+              assigneeName={userName(bug.assigneeId)}
+              cycleName={projectId ? cycleName(bug.cycleId) : undefined}
+              projectName={!projectId ? projectNameById(bug.projectId) : undefined}
+              actions={
+                <>
+                  <Link to={`/bugs/${bug.id}`} className="tb-link text-xs font-semibold">
+                    View
                   </Link>
-                </td>
-                <td className="px-4 py-3">{bug.priority}</td>
-                <td className="px-4 py-3">{bug.severity}</td>
-                <td className="px-4 py-3">{bug.status}</td>
-                <td className="px-4 py-3">{userName(bug.assigneeId)}</td>
-                <td className="px-4 py-3">{cycleName(bug.cycleId)}</td>
-                <td className="px-4 py-3">
-                  <button
-                    type="button"
-                    className="rounded-lg border border-red-900/50 px-2.5 py-1 text-xs text-[var(--danger)] hover:bg-[var(--danger-soft)]"
-                    disabled={deleteMutation.isPending}
-                    onClick={() => {
-                      if (window.confirm(`Delete bug "${bug.title}"?`)) {
-                        deleteMutation.mutate(bug.id);
-                      }
-                    }}
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                  {canDelete ? (
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-[var(--danger)] hover:underline"
+                      disabled={deleteMutation.isPending}
+                      onClick={() => {
+                        if (window.confirm(`Delete bug "${bug.title}"?`)) {
+                          deleteMutation.mutate(bug.id);
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                  ) : null}
+                </>
+              }
+            />
+          ))}
+        </div>
+      )}
     </Shell>
   );
 }
@@ -330,11 +399,7 @@ function FilterSelect({
   return (
     <label className="tb-label">
       {label}
-      <select
-        className="tb-select"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
+      <select className="tb-select" value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((opt) => (
           <option key={opt || "all"} value={opt}>
             {opt || "All"}

@@ -1,17 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { fetchProject, updateProject } from "../api";
+import { useAuth } from "../auth";
 import { Shell } from "../components/Shell";
+import { canCreateProject } from "../utils/roles";
 import { validateName, validateOptionalUrl } from "../utils/validation";
+
 export function ProjectEditPage() {
+  const { user } = useAuth();
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const canManage = canCreateProject(user);
+
   const projectQuery = useQuery({
     queryKey: ["project", id],
     queryFn: () => fetchProject(id),
-    enabled: !!id,
+    enabled: !!id && canManage,
   });
 
   const [name, setName] = useState("");
@@ -44,6 +50,9 @@ export function ProjectEditPage() {
     onError: (err: Error) => setError(err.message),
   });
 
+  if (!canManage) {
+    return <Navigate to={`/projects/${id}`} replace />;
+  }
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);

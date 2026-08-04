@@ -40,3 +40,23 @@ export function validatePasswordChange(
   if (next !== confirm) return "New passwords do not match";
   return null;
 }
+
+/** Change-password form — all fields required. */
+export function validateRequiredPasswordChange(
+  current: string,
+  next: string,
+  confirm: string,
+): string | null {
+  if (!current) return "Enter your current password";
+  if (!next) return "Enter a new password";
+  if (next.length < 8) return "New password must be at least 8 characters";
+  if (next !== confirm) return "New passwords do not match";
+  return null;
+}
+
+export function validateNewPassword(next: string, confirm: string): string | null {
+  if (!next) return "Enter a new password";
+  if (next.length < 8) return "New password must be at least 8 characters";
+  if (next !== confirm) return "New passwords do not match";
+  return null;
+}

@@ -13,7 +13,7 @@ const FORMATS: {
     id: "pdf",
     label: "PDF",
     ext: ".pdf",
-    blurb: "Print-ready report — summary, defect highlight, and steps in one glance.",
+    blurb: "One file for all selected bugs — full details + embedded screenshot images.",
     bestFor: "Share with managers / email",
     accent: "border-rose-200 bg-rose-50 hover:border-rose-400",
   },
@@ -21,17 +21,9 @@ const FORMATS: {
     id: "excel",
     label: "Excel",
     ext: ".xlsx",
-    blurb: "3 sheets: Summary, Steps, Screenshots — filter and sort easily.",
+    blurb: "One workbook: Bugs, Steps, Screenshots + embedded images sheet.",
     bestFor: "QA trackers & spreadsheets",
     accent: "border-emerald-200 bg-emerald-50 hover:border-emerald-400",
-  },
-  {
-    id: "json",
-    label: "JSON",
-    ext: ".json",
-    blurb: "Readable + raw bug data for tools, import, and automation.",
-    bestFor: "Devs & integrations",
-    accent: "border-sky-200 bg-sky-50 hover:border-sky-400",
   },
 ];
 

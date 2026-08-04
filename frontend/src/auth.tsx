@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { User } from "./types";
 import { clearAuthStorage } from "./authEvents";
+import { fetchMe } from "./api";
 
 interface AuthState {
   token: string | null;
@@ -73,25 +74,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const res = await fetch("/api/auth/me", {
-          headers: { Authorization: `Bearer ${stored}` },
-        });
-        if (!res.ok) {
-          clearAuthStorage();
-          if (!cancelled) {
-            setToken(null);
-            setUser(null);
-          }
-        } else {
-          const me = (await res.json()) as User;
-          localStorage.setItem(USER_KEY, JSON.stringify(me));
-          if (!cancelled) {
-            setToken(stored);
-            setUser(me);
-          }
+        const me = await fetchMe();
+        localStorage.setItem(USER_KEY, JSON.stringify(me));
+        if (!cancelled) {
+          setToken(stored);
+          setUser(me);
         }
       } catch {
-        // Network blip — keep session, pages will retry
+        // 401 clears storage via forceLogout; network blips keep the session
+        if (!localStorage.getItem(TOKEN_KEY) && !cancelled) {
+          setToken(null);
+          setUser(null);
+        }
       } finally {
         if (!cancelled) setReady(true);
       }

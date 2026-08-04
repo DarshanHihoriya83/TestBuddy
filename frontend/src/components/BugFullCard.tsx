@@ -133,27 +133,34 @@ export function BugFullCard({
   assigneeName,
   reporterName,
   cycleName,
+  moduleName,
   compactLink = true,
   collapsible = false,
   defaultOpen = false,
   open: openControlled,
   onOpenChange,
+  selected,
+  onSelectedChange,
 }: {
   bug: Bug;
   assigneeName: string;
   reporterName: string;
   cycleName: string;
+  moduleName?: string;
   compactLink?: boolean;
   /** Project detail: summary row + expandable inner details */
   collapsible?: boolean;
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  selected?: boolean;
+  onSelectedChange?: (bugId: string, selected: boolean) => void;
 }) {
   const panelId = useId();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen || !collapsible);
   const isControlled = openControlled !== undefined;
   const open = isControlled ? openControlled : uncontrolledOpen;
+  const selectable = typeof onSelectedChange === "function";
 
   function setOpen(next: boolean) {
     if (!isControlled) setUncontrolledOpen(next);
@@ -177,7 +184,7 @@ export function BugFullCard({
         </p>
       </div>
 
-      <dl className="grid gap-3 rounded-xl border border-[var(--line)] bg-white p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+      <dl className="grid gap-3 rounded-xl border border-[var(--line)] bg-white p-4 text-sm sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <div>
           <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Assignee</dt>
           <dd className="mt-1 font-medium">{assigneeName}</dd>
@@ -185,6 +192,10 @@ export function BugFullCard({
         <div>
           <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Reporter</dt>
           <dd className="mt-1 font-medium">{reporterName}</dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Module</dt>
+          <dd className="mt-1 font-medium">{moduleName || "—"}</dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Cycle</dt>
@@ -212,7 +223,11 @@ export function BugFullCard({
 
       {compactLink && (
         <div className="flex justify-end">
-          <Link to={`/bugs/${bug.id}`} className="tb-btn-ghost text-xs">
+          <Link
+            to={`/bugs/${bug.id}`}
+            state={{ fromProjectId: bug.projectId }}
+            className="tb-btn-ghost text-xs"
+          >
             Open bug page →
           </Link>
         </div>
@@ -253,71 +268,96 @@ export function BugFullCard({
   }
 
   return (
-    <article className="tb-card overflow-hidden transition-shadow hover:shadow-md">
-      <button
-        type="button"
-        className="flex w-full items-stretch gap-4 p-4 text-left sm:p-5"
-        aria-expanded={open}
-        aria-controls={panelId}
-        onClick={() => setOpen(!open)}
-      >
-        <div className="min-w-0 flex-1 space-y-2.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${statusTone(bug.status)}`}>
-              {bug.status}
-            </span>
-            <span
-              className={`rounded-md px-2 py-0.5 text-xs font-semibold ${priorityTone(bug.priority)}`}
-            >
-              {bug.priority}
-            </span>
-            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
-              {bug.severity}
-            </span>
-            <span className="text-xs text-[var(--muted)]">{cycleName}</span>
+    <article
+      className={`tb-card overflow-hidden transition-shadow hover:shadow-md ${
+        selected ? "ring-2 ring-[var(--accent)]/40" : ""
+      }`}
+    >
+      <div className="flex items-stretch gap-2 sm:gap-3">
+        {selectable ? (
+          <label
+            className="flex shrink-0 items-start px-3 pt-5 sm:px-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 cursor-pointer accent-[var(--accent)]"
+              checked={!!selected}
+              aria-label={`Select bug ${bug.title}`}
+              onChange={(e) => onSelectedChange(bug.id, e.target.checked)}
+            />
+          </label>
+        ) : null}
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-stretch gap-4 py-4 pr-4 text-left sm:py-5 sm:pr-5"
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={() => setOpen(!open)}
+        >
+          <div className="min-w-0 flex-1 space-y-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${statusTone(bug.status)}`}>
+                {bug.status}
+              </span>
+              <span
+                className={`rounded-md px-2 py-0.5 text-xs font-semibold ${priorityTone(bug.priority)}`}
+              >
+                {bug.priority}
+              </span>
+              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                {bug.severity}
+              </span>
+              {moduleName ? (
+                <span className="rounded-md bg-[var(--accent-soft)] px-2 py-0.5 text-xs font-semibold text-[var(--accent)]">
+                  {moduleName}
+                </span>
+              ) : null}
+              <span className="text-xs text-[var(--muted)]">{cycleName}</span>
+            </div>
+
+            <h3 className="text-lg font-bold leading-snug tracking-tight text-[var(--ink)] sm:text-xl">
+              {bug.title}
+            </h3>
+
+            {shortDesc && (
+              <p className="line-clamp-2 text-sm text-[var(--muted)]">{shortDesc}</p>
+            )}
+
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--muted)]">
+              <span>
+                Assignee <strong className="font-semibold text-[var(--ink)]">{assigneeName}</strong>
+              </span>
+              <span>
+                {stepCount} step{stepCount === 1 ? "" : "s"}
+              </span>
+              <span>
+                {shotCount} screenshot{shotCount === 1 ? "" : "s"}
+              </span>
+              <span>{formatWhen(bug.createdAt)}</span>
+            </div>
           </div>
 
-          <h3 className="text-lg font-bold leading-snug tracking-tight text-[var(--ink)] sm:text-xl">
-            {bug.title}
-          </h3>
-
-          {shortDesc && (
-            <p className="line-clamp-2 text-sm text-[var(--muted)]">{shortDesc}</p>
+          {previewShot && (
+            <div className="hidden h-20 w-28 shrink-0 overflow-hidden rounded-lg border border-[var(--line)] sm:block">
+              <AuthImage
+                src={previewShot.url}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            </div>
           )}
 
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--muted)]">
-            <span>
-              Assignee <strong className="font-semibold text-[var(--ink)]">{assigneeName}</strong>
-            </span>
-            <span>
-              {stepCount} step{stepCount === 1 ? "" : "s"}
-            </span>
-            <span>
-              {shotCount} screenshot{shotCount === 1 ? "" : "s"}
-            </span>
-            <span>{formatWhen(bug.createdAt)}</span>
-          </div>
-        </div>
-
-        {previewShot && (
-          <div className="hidden h-20 w-28 shrink-0 overflow-hidden rounded-lg border border-[var(--line)] sm:block">
-            <AuthImage
-              src={previewShot.url}
-              alt=""
-              className="h-full w-full object-cover"
-            />
-          </div>
-        )}
-
-        <span
-          className={`mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-white text-[var(--muted)] transition-transform ${
-            open ? "rotate-180" : ""
-          }`}
-          aria-hidden
-        >
-          ▾
-        </span>
-      </button>
+          <span
+            className={`mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--line)] bg-white text-[var(--muted)] transition-transform ${
+              open ? "rotate-180" : ""
+            }`}
+            aria-hidden
+          >
+            ▾
+          </span>
+        </button>
+      </div>
 
       <div
         id={panelId}

@@ -1,4 +1,5 @@
 import browser from "webextension-polyfill";
+import { createBug, getToken } from "./api";
 import {
   EMPTY_SESSION,
   RECORDING_STORAGE_KEY,
@@ -9,7 +10,11 @@ import {
 } from "./recording";
 import type { Step } from "./types";
 import { buildActualResult, buildStepAction } from "./stepText";
-import { buildObservationFromOverview, type Annotation } from "./content/bugCapture";
+import {
+  buildObservationFromOverview,
+  composeBugDescription,
+  type Annotation,
+} from "./content/bugCapture";
 import { compressDataUrlForStorage } from "./utils/imageCompress";
 
 let writeChain: Promise<unknown> = Promise.resolve();
@@ -226,6 +231,71 @@ async function saveBugCapture(args: {
   });
 }
 
+async function uploadBugFromSession(): Promise<{
+  session: RecordingSession;
+  bugId: string;
+  message: string;
+}> {
+  const token = await getToken();
+  if (!token) throw new Error("Not signed in — open the extension popup and sign in as Tester");
+
+  let session = await readSession();
+  if (!session.meta) throw new Error("No bug draft — start recording from the popup first");
+  if (!session.meta.moduleId) {
+    throw new Error("Select a module in the popup before starting, then use Upload bug");
+  }
+  if (!session.steps.length) {
+    throw new Error("No steps captured yet — interact with the page or take a screenshot");
+  }
+
+  const meta = session.meta;
+
+  // Stop recording if still live so upload is consistent
+  if (session.status === "recording" || session.status === "paused") {
+    session = await writeSession({ ...session, status: "stopped", meta });
+  }
+
+  const bug = await createBug({
+    title: meta.title,
+    description: composeBugDescription(meta.description, session.screenshots || []),
+    priority: meta.priority,
+    severity: meta.severity,
+    assigneeId: meta.assigneeId,
+    cycleId: meta.cycleId,
+    projectId: meta.projectId,
+    moduleId: meta.moduleId,
+    status: "NEW",
+    steps: session.steps.map((step) => ({
+      order: step.order,
+      actionType: step.actionType,
+      elementLabel: step.elementLabel,
+      selector: step.selector,
+      valueEntered: step.valueEntered,
+      pageUrl: step.pageUrl,
+      description: step.description,
+      actualResult: step.actualResult,
+      expectedResult: step.expectedResult?.trim() ? step.expectedResult : undefined,
+      screenshotId: step.screenshotId,
+    })),
+    screenshots: (session.screenshots || []).map((shot) => ({
+      id: shot.id,
+      dataUrl: shot.dataUrl,
+      overview: shot.overview,
+      pageUrl: shot.pageUrl,
+      createdAt: shot.createdAt,
+      annotations: shot.annotations,
+    })),
+  });
+
+  const cleared = await writeSession({ ...EMPTY_SESSION });
+  const moduleLabel = meta.moduleName || "selected module";
+  return {
+    session: cleared,
+    bugId: bug.id,
+    message: `Bug uploaded to ${moduleLabel} (${bug.steps.length} steps)`,
+  };
+}
+
 browser.runtime.onMessage.addListener((message: unknown) => {
   return handleMessage(message as ExtensionMessage);
 });
@@ -255,8 +325,47 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionRespon
         const session = await readSession();
         return { ok: true, session: await writeSession({ ...session, status: "stopped" }) };
       }
+      case "PATCH_STEP_TEXTS": {
+        const session = await readSession();
+        const patches = message.steps;
+        if (!patches.length) return { ok: true, session };
+        const byOrder = new Map(patches.map((p) => [p.order, p]));
+        const steps = session.steps.map((step) => {
+          const p = byOrder.get(step.order);
+          if (!p) return step;
+          return {
+            ...step,
+            description: typeof p.description === "string" ? p.description : step.description,
+            actualResult:
+              typeof p.actualResult === "string" ? p.actualResult : step.actualResult,
+            expectedResult:
+              typeof p.expectedResult === "string"
+                ? p.expectedResult.trim() || undefined
+                : step.expectedResult,
+          };
+        });
+        return { ok: true, session: await writeSession({ ...session, steps }) };
+      }
       case "CLEAR_RECORDING":
         return { ok: true, session: await writeSession({ ...EMPTY_SESSION }) };
+      case "PATCH_RECORDING_META": {
+        const session = await readSession();
+        if (!session.meta) return { ok: true, session };
+        const nextMeta = { ...session.meta, ...message.meta };
+        return {
+          ok: true,
+          session: await writeSession({ ...session, meta: nextMeta }),
+        };
+      }
+      case "UPLOAD_BUG": {
+        const result = await uploadBugFromSession();
+        return {
+          ok: true,
+          session: result.session,
+          bugId: result.bugId,
+          message: result.message,
+        };
+      }
       case "ADD_STEP":
         return { ok: true, session: await addStep(message.step) };
       case "CAPTURE_VISIBLE_TAB":

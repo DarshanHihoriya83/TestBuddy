@@ -46,17 +46,31 @@ Frontend dashboard ──► same Node Backend
 
 Mirror these in the Node backend (DB rows / mappers) and as TypeScript interfaces (frontend + extension):
 
-- `User` — roles: ADMIN | TESTER | DEVELOPER | MANAGER
-- `Project` — optional jiraProjectKey, adoOrgUrl, adoProject
+- `User` — roles: SUPERADMIN | ADMIN | MANAGER | DEVELOPER | TESTER
+- `Organization` — name; members via `organization_members`
+- `Project` — organizationId required; optional jiraProjectKey, adoOrgUrl, adoProject
+- `Module` — projectId, name (feature area for bugs)
 - `Cycle` — projectId, name, isDefault (dropdown defaults to Cycle 1)
 - `Step` — order, actionType, elementLabel, selector, valueEntered (mask passwords as `••••`), pageUrl, description, expectedResult?
 - `Annotation` / `Attachment` — screenshot/video metadata
-- `Bug` — priority, severity, assignee/reporter/cycle/project, status, steps, attachments, externalRefs
+- `Bug` — priority, severity, assignee/reporter/cycle/project, optional moduleId, status, steps, attachments, externalRefs
+- `BugComment` — bugId, authorId, body
 - `TestCase` — type POSITIVE|NEGATIVE, status AI_DRAFT|VERIFIED|REJECTED|UPLOADED, generatedByAi
+
+## RBAC (high level)
+
+- **Extension login / create-bug UI:** TESTER only
+- **Organizations:** SuperAdmin create/manage; members see their orgs
+- **Projects:** SuperAdmin | Admin | Manager create (must belong to org)
+- **Modules / create bug:** includes Tester
+- **Bug status + comments:** Developer and Tester (plus Admin/Manager/SuperAdmin)
+- **Role transfer:** SuperAdmin | Admin | Manager only (Manager: Developer ↔ Tester)
+- **User hard-delete:** SuperAdmin, only after deactivate
 
 ## API surface (owned by backend)
 
-Auth, users, projects, cycles, bugs CRUD, testcases CRUD + generate/verify/bulk-upload, exports, Jira/ADO push. AI routes (`/ai/...`) live **only** on the Python service and are called server-to-server.
+Auth, users, organizations, projects, modules, cycles, bugs CRUD + comments, exports, Jira/ADO push.
+AI routes (`/ai/...`) live **only** on the Python service and are called server-to-server.
 
 ## Privacy
 

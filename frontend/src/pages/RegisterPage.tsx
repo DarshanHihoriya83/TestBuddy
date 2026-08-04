@@ -6,16 +6,22 @@ import { TopNavBar } from "../components/AppNavigation";
 import { validateEmail, validateName } from "../utils/validation";
 
 export function RegisterPage() {
-  const { token, setSession } = useAuth();
+  const { token, ready, setSession } = useAuth();
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [role, setRole] = useState("TESTER");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  if (!ready) {
+    return (
+      <div className="grid min-h-screen place-items-center text-sm text-[var(--muted)]">
+        Checking session…
+      </div>
+    );
+  }
   if (token) return <Navigate to="/bugs" replace />;
 
   async function onSubmit(e: FormEvent) {
@@ -47,7 +53,7 @@ export function RegisterPage() {
         name: name.trim(),
         email: email.trim(),
         password,
-        role,
+        role: "TESTER",
       });
       setSession(result.token, result.user);
       navigate("/bugs");
@@ -109,14 +115,6 @@ export function RegisterPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
-            </label>
-            <label className="tb-label mt-4">
-              Role
-              <select className="tb-select" value={role} onChange={(e) => setRole(e.target.value)}>
-                <option value="TESTER">Tester</option>
-                <option value="DEVELOPER">Developer</option>
-                <option value="MANAGER">Manager</option>
-              </select>
             </label>
             <label className="tb-label mt-4">
               Password

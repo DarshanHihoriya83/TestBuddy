@@ -38,8 +38,8 @@ npm run dev
 Open: http://localhost:5173
 
 
-4) Extension (optional)
------------------------
+4) Extension (Tester-only) — optional
+-------------------------------------
 cd extension
 npm install
 npm run pack
@@ -51,9 +51,12 @@ Then either:
 Chrome: chrome://extensions → Developer mode → Load unpacked
 Select the unzipped "TestBuddy" folder (contains manifest.json).
 
+IMPORTANT: Extension login accepts only role = TESTER.
+Demo tester: alice@testbuddy.local / password
 
-5) AI service (title/description polish) — port 8001
-----------------------------------------------------
+
+5) AI service (title / steps polish) — port 8001
+------------------------------------------------
 cd ai-service
 python -m venv .venv
 .\.venv\Scripts\activate
@@ -67,18 +70,30 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8001
 
 Health: http://localhost:8001/health
-Polish: POST /ai/bug/polish  (called by backend only)
 
 Also add to backend/.env:
   AI_SERVICE_URL=http://127.0.0.1:8001
 
 
-Demo login
-----------
-Email    : alice@testbuddy.local
-Password : password
+Demo logins (password for all: password)
+----------------------------------------
+SuperAdmin : superadmin@testbuddy.local
+Admin      : admin@testbuddy.local
+Manager    : carol@testbuddy.local
+Developer  : bob@testbuddy.local
+Tester     : alice@testbuddy.local
 
-Or register a new account at: http://localhost:5173/register
+Public register always creates TESTER.
+Admins create other roles from Users page.
+
+
+Roles cheat-sheet
+-----------------
+- SuperAdmin : organizations, all users, hard-delete users
+- Admin / Manager : create projects under an org; full bug edit
+- Manager : role transfer for Developer ↔ Tester only
+- Tester : modules, create bugs (extension), comments, bug status, project members
+- Developer : comments + bug status only (no bug create via extension)
 
 
 Useful URLs
@@ -86,42 +101,31 @@ Useful URLs
 Home / extension download : http://localhost:5173/
 Login                     : http://localhost:5173/login
 Register                  : http://localhost:5173/register
-Bugs dashboard            : http://localhost:5173/bugs
+Organizations             : http://localhost:5173/organizations
 Projects                  : http://localhost:5173/projects
+Bugs                      : http://localhost:5173/bugs
+Users (SA/Admin/Manager)  : http://localhost:5173/users
 Profile                   : http://localhost:5173/profile
 Backend API               : http://localhost:8080/api
 Extension zip (API)       : http://localhost:8080/api/extension/download
-Bug export JSON           : GET /api/bugs/export/json
-Bug import JSON           : POST /api/bugs/import
 
 
 Notes
 -----
 - Start Backend before Frontend / Extension (they call localhost:8080).
-- Copy backend/.env.example to backend/.env if needed (defaults match local Postgres).
+- Copy backend/.env.example → backend/.env if needed.
+- Seed creates Demo Organization + Demo Project + General module.
 
 
-Recent updates (30 Jul 2026)
-----------------------------
-
-Backend — Node.js / Express
-  - Java/Spring Boot backend removed; use backend/ (Express + PostgreSQL + JWT).
-  - Default DB: postgresql://admin:admin@localhost:5432/testbuddy
-  - Seeded users password: password (see README for full list).
-
-Extension — v0.3.0 recording improvements
-  - On-page toolbar: Record / Pause / Stop / Screenshot (top frame only — no duplicate bar in iframes).
-  - Screenshot flow: capture tab → draw red highlight → saves as a step.
-  - Bug overview text can generate a step from your description.
-  - Pack: cd extension && npm run pack
-    → TestBuddy-extension.zip in frontend/public and backend/public/downloads
-
-Frontend — light UI
-  - Dashboard uses a light theme (white cards, slate text, teal accent).
-  - Pages: / (home), /login, /register, /bugs, /projects, /profile
-  - After UI changes: cd frontend && npm run build (or npm run dev for local work)
-
-Regression checks (optional, from repo root)
+Regression (from repo root, backend on :8080)
+---------------------------------------------
   node scripts/regression.mjs
-  node scripts/smoke-recording-api.mjs
-  (Requires backend running on port 8080.)
+
+
+Recent updates (3 Aug 2026)
+---------------------------
+- Organizations (SuperAdmin create) + org-scoped projects
+- Project modules; bug comments; role-based bug update/delete
+- Role transfer: SuperAdmin / Admin / Manager only
+- Extension: Tester-only login + create-bug validation
+- Users page: Change role UI; SuperAdmin hard-delete after deactivate
