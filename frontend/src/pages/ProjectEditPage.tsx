@@ -5,7 +5,7 @@ import { fetchProject, updateProject } from "../api";
 import { useAuth } from "../auth";
 import { Shell } from "../components/Shell";
 import { canCreateProject } from "../utils/roles";
-import { validateName, validateOptionalUrl } from "../utils/validation";
+import { validateOptionalUrl, normalizeProjectName, validateProjectName, PROJECT_NAME_MAX_LENGTH } from "../utils/validation";
 
 export function ProjectEditPage() {
   const { user } = useAuth();
@@ -21,6 +21,7 @@ export function ProjectEditPage() {
   });
 
   const [name, setName] = useState("");
+  const [nameHint, setNameHint] = useState<string | null>(null);
   const [jiraProjectKey, setJiraProjectKey] = useState("");
   const [adoOrgUrl, setAdoOrgUrl] = useState("");
   const [adoProject, setAdoProject] = useState("");
@@ -37,7 +38,7 @@ export function ProjectEditPage() {
   const saveMutation = useMutation({
     mutationFn: () =>
       updateProject(id, {
-        name: name.trim(),
+        name: normalizeProjectName(name),
         jiraProjectKey: jiraProjectKey.trim() || undefined,
         adoOrgUrl: adoOrgUrl.trim() || undefined,
         adoProject: adoProject.trim() || undefined,
@@ -56,8 +57,11 @@ export function ProjectEditPage() {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const nameErr = validateName(name);
+    const normalized = normalizeProjectName(name);
+    setName(normalized);
+    const nameErr = validateProjectName(normalized);
     if (nameErr) {
+      setNameHint(nameErr);
       setError(nameErr);
       return;
     }
@@ -84,7 +88,36 @@ export function ProjectEditPage() {
           <h2 className="text-2xl font-bold text-[var(--ink)]">Edit project</h2>
           <label className="tb-label">
             Name *
-            <input className="tb-input" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
+            <input
+              className="tb-input"
+              value={name}
+              onChange={(e) => {
+                const raw = e.target.value;
+                const next =
+                  raw.length > PROJECT_NAME_MAX_LENGTH
+                    ? raw.slice(0, PROJECT_NAME_MAX_LENGTH)
+                    : raw;
+                setName(next);
+                setNameHint(next.trim() ? validateProjectName(next) : null);
+              }}
+              onBlur={() => {
+                const normalized = normalizeProjectName(name);
+                setName(normalized);
+                setNameHint(normalized ? validateProjectName(normalized) : null);
+              }}
+              required
+              minLength={2}
+              maxLength={PROJECT_NAME_MAX_LENGTH}
+              placeholder="Letters and spaces only"
+            />
+            <span className="mt-1 flex justify-between gap-2 text-[11px] font-normal normal-case tracking-normal">
+              <span className={nameHint ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
+                {nameHint || "Alphabetical characters only · max 100 characters"}
+              </span>
+              <span className="shrink-0 text-[var(--muted)]">
+                {normalizeProjectName(name).length}/{PROJECT_NAME_MAX_LENGTH}
+              </span>
+            </span>
           </label>
           <label className="tb-label">
             Jira project key

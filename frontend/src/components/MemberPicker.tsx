@@ -49,6 +49,8 @@ export function MemberList({
   removing,
   onRemove,
   emptyText,
+  /** When false, parent owns confirmation UI (e.g. ConfirmDialog). Default true. */
+  confirmBeforeRemove = true,
 }: {
   members: User[];
   currentUserId?: string;
@@ -56,6 +58,7 @@ export function MemberList({
   removing?: boolean;
   onRemove?: (userId: string, name: string) => void;
   emptyText?: string;
+  confirmBeforeRemove?: boolean;
 }) {
   if (members.length === 0) {
     return <p className="mt-4 text-sm text-[var(--muted)]">{emptyText ?? "No members yet."}</p>;
@@ -82,7 +85,8 @@ export function MemberList({
               className="tb-btn-ghost text-xs text-rose-600"
               disabled={removing}
               onClick={() => {
-                if (window.confirm(`Remove ${m.name}?`)) onRemove(m.id, m.name);
+                if (confirmBeforeRemove && !window.confirm(`Remove ${m.name}?`)) return;
+                onRemove(m.id, m.name);
               }}
             >
               Remove

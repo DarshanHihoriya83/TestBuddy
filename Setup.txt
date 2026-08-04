@@ -78,22 +78,23 @@ Also add to backend/.env:
 Demo logins (password for all: password)
 ----------------------------------------
 SuperAdmin : superadmin@testbuddy.local
-Admin      : admin@testbuddy.local
 Manager    : carol@testbuddy.local
 Developer  : bob@testbuddy.local
 Tester     : alice@testbuddy.local
 
 Public register always creates TESTER.
-Admins create other roles from Users page.
+Managers (and SuperAdmin) create other roles from Users page.
 
 
 Roles cheat-sheet
 -----------------
 - SuperAdmin : organizations, all users, hard-delete users
-- Admin / Manager : create projects under an org; full bug edit
-- Manager : role transfer for Developer ↔ Tester only
-- Tester : modules, create bugs (extension), comments, bug status, project members
-- Developer : comments + bug status only (no bug create via extension)
+- Manager : create projects under an org (max 10 per Manager, env MAX_PROJECTS_PER_MANAGER); sees all org projects; full bug edit; user CRUD; org members; assign Manager/Dev/Tester; grant project access
+- Tester : org member; sees only Manager-assigned projects; modules, create bugs (extension), comments, bug status
+- Developer : org member; sees only Manager-assigned projects; comments + bug status only (no bug create / no project create)
+
+Project access: org membership alone is not enough for Tester/Developer — Manager must add them to each project.
+Project create: Manager only (SuperAdmin also allowed); Developer/Tester cannot create. Managers are capped by MAX_PROJECTS_PER_MANAGER (default 10).
 
 
 Useful URLs
@@ -104,7 +105,7 @@ Register                  : http://localhost:5173/register
 Organizations             : http://localhost:5173/organizations
 Projects                  : http://localhost:5173/projects
 Bugs                      : http://localhost:5173/bugs
-Users (SA/Admin/Manager)  : http://localhost:5173/users
+Users (SA/Manager)        : http://localhost:5173/users
 Profile                   : http://localhost:5173/profile
 Backend API               : http://localhost:8080/api
 Extension zip (API)       : http://localhost:8080/api/extension/download
@@ -122,10 +123,10 @@ Regression (from repo root, backend on :8080)
   node scripts/regression.mjs
 
 
-Recent updates (3 Aug 2026)
----------------------------
+Recent updates
+--------------
 - Organizations (SuperAdmin create) + org-scoped projects
 - Project modules; bug comments; role-based bug update/delete
-- Role transfer: SuperAdmin / Admin / Manager only
+- Role transfer: SuperAdmin / Manager (Admin role removed)
 - Extension: Tester-only login + create-bug validation
 - Users page: Change role UI; SuperAdmin hard-delete after deactivate

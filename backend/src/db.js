@@ -203,7 +203,8 @@ export async function ensureSchema() {
     END $$;
   `);
 
-  // Allow SUPERADMIN (+ legacy roles). Older Hibernate check may omit SUPERADMIN.
+  // Migrate legacy ADMIN → MANAGER, then enforce role check without ADMIN.
+  await query(`UPDATE users SET role = 'MANAGER' WHERE role = 'ADMIN'`);
   await query(`
     DO $$
     DECLARE
@@ -221,13 +222,9 @@ export async function ensureSchema() {
       LOOP
         EXECUTE format('ALTER TABLE users DROP CONSTRAINT %I', r.conname);
       END LOOP;
-      IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'users_role_check'
-      ) THEN
-        ALTER TABLE users
-          ADD CONSTRAINT users_role_check
-          CHECK (role IN ('SUPERADMIN','ADMIN','MANAGER','DEVELOPER','TESTER'));
-      END IF;
+      ALTER TABLE users
+        ADD CONSTRAINT users_role_check
+        CHECK (role IN ('SUPERADMIN','MANAGER','DEVELOPER','TESTER'));
     END $$;
   `);
 
@@ -264,5 +261,39 @@ export async function ensureSchema() {
           FOREIGN KEY (bug_id) REFERENCES bugs(id) ON DELETE CASCADE;
       END IF;
     END $$;
+  `);
+
+  // Track who created each project (Manager per-user create limit).
+  await query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS created_by UUID
+  `);
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'projects_created_by_fkey'
+      ) THEN
+        ALTER TABLE projects
+          ADD CONSTRAINT projects_created_by_fkey
+          FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
+      END IF;
+    END $$;
+  `);
+  // Backfill: prefer a Manager who is already a project member, else first member.
+  await query(`
+    UPDATE projects p
+    SET created_by = sub.user_id
+    FROM (
+      SELECT DISTINCT ON (pm.project_id)
+        pm.project_id,
+        pm.user_id
+      FROM project_members pm
+      JOIN users u ON u.id = pm.user_id
+      ORDER BY pm.project_id,
+        CASE u.role WHEN 'MANAGER' THEN 0 WHEN 'SUPERADMIN' THEN 1 ELSE 2 END,
+        pm.created_at ASC
+    ) sub
+    WHERE p.id = sub.project_id AND p.created_by IS NULL
   `);
 }

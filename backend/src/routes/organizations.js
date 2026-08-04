@@ -33,7 +33,7 @@ router.get("/:id/members", requireAuth, async (req, res, next) => {
 router.post("/:id/members", requireAuth, async (req, res, next) => {
   try {
     if (!canManageOrgMembers(req.user)) {
-      throw forbidden("Only SuperAdmin or Admin can add organization members");
+      throw forbidden("Only SuperAdmin or Manager can add organization members");
     }
     const userId = req.body?.userId;
     if (!userId) throw badRequest("userId is required");
@@ -46,7 +46,7 @@ router.post("/:id/members", requireAuth, async (req, res, next) => {
 router.delete("/:id/members/:userId", requireAuth, async (req, res, next) => {
   try {
     if (!canManageOrgMembers(req.user)) {
-      throw forbidden("Only SuperAdmin or Admin can remove organization members");
+      throw forbidden("Only SuperAdmin or Manager can remove organization members");
     }
     await app.removeOrganizationMember(req.user, req.params.id, req.params.userId);
     res.status(204).end();

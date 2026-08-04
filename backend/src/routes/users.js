@@ -1,14 +1,9 @@
 import { Router } from "express";
 import * as app from "../services/appService.js";
 import { requireAdmin, requireAuth, requireRoleTransfer, requireSuperAdmin } from "../middleware/auth.js";
-import { badRequest, forbidden } from "../errors.js";
-import { isManager } from "../roles.js";
+import { badRequest } from "../errors.js";
 
 const router = Router();
-
-function definedKeys(body) {
-  return Object.keys(body || {}).filter((k) => body[k] !== undefined);
-}
 
 /** Assignees dropdown — active users visible to the caller (shared org/project). */
 router.get("/", requireAuth, async (req, res, next) => {
@@ -24,7 +19,7 @@ router.get("/", requireAuth, async (req, res, next) => {
   }
 });
 
-/** Full directory including inactive — SuperAdmin / Admin / Manager. */
+/** Full directory including inactive — SuperAdmin / Manager. */
 router.get("/admin", requireRoleTransfer, async (req, res, next) => {
   try {
     const projectId =
@@ -77,14 +72,6 @@ router.post("/:id/reset-password", requireRoleTransfer, async (req, res, next) =
 router.put("/:id", requireRoleTransfer, async (req, res, next) => {
   try {
     const body = req.body || {};
-    // Managers may only transfer roles — not edit profile / password / active
-    if (isManager(req.user)) {
-      const keys = definedKeys(body);
-      if (keys.some((k) => k !== "role")) {
-        throw forbidden("Managers can only change user roles");
-      }
-      if (!body.role) throw badRequest("role is required");
-    }
     res.json(await app.adminUpdateUser(req.user, req.params.id, body));
   } catch (err) {
     next(err);

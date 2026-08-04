@@ -18,6 +18,14 @@ router.get("/projects", requireAuth, async (req, res, next) => {
   }
 });
 
+router.get("/projects/quota", requireAuth, async (req, res, next) => {
+  try {
+    res.json(await app.getProjectCreationQuota(req.user));
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get("/projects/:id/members", requireAuth, async (req, res, next) => {
   try {
     res.json(await app.listProjectMembers(req.user, req.params.id));

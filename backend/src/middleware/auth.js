@@ -51,7 +51,7 @@ export function requireRoles(...allowed) {
 export function requireAdmin(req, res, next) {
   requireAuth(req, res, () => {
     if (!isAdmin(req.user)) {
-      return next(forbidden("Admin access required"));
+      return next(forbidden("Manager or SuperAdmin access required"));
     }
     next();
   });
@@ -66,21 +66,21 @@ export function requireSuperAdmin(req, res, next) {
   });
 }
 
-/** SuperAdmin, Admin, or Manager — user role transfer / directory. */
+/** SuperAdmin or Manager — user role transfer / directory. */
 export function requireRoleTransfer(req, res, next) {
   requireAuth(req, res, () => {
     if (!canTransferRoles(req.user)) {
-      return next(forbidden("Only SuperAdmin, Admin, or Manager can manage user roles"));
+      return next(forbidden("Only SuperAdmin or Manager can manage user roles"));
     }
     next();
   });
 }
 
-/** SuperAdmin, Admin, or Manager — create/edit projects. */
+/** SuperAdmin or Manager — create/edit projects. */
 export function requireProjectCreator(req, res, next) {
   requireAuth(req, res, () => {
     if (!canCreateProject(req.user)) {
-      return next(forbidden("Admin or Manager access required to manage projects"));
+      return next(forbidden("Manager or SuperAdmin access required to manage projects"));
     }
     next();
   });

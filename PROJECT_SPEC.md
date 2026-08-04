@@ -74,7 +74,7 @@ Implement as JPA `@Entity` classes in the backend; mirror as TypeScript interfac
 ```typescript
 interface User {
   id: string; name: string; email: string;
-  role: "ADMIN" | "TESTER" | "DEVELOPER" | "MANAGER";
+  role: "SUPERADMIN" | "MANAGER" | "TESTER" | "DEVELOPER";
 }
 
 interface Project {

@@ -4,7 +4,6 @@ import type { Project, UserRole } from "../../types";
 const ROLE_FILTERS: Array<{ id: "ALL" | UserRole; label: string }> = [
   { id: "ALL", label: "All roles" },
   { id: "SUPERADMIN", label: "Super Admin" },
-  { id: "ADMIN", label: "Admin" },
   { id: "MANAGER", label: "Manager" },
   { id: "DEVELOPER", label: "Developer" },
   { id: "TESTER", label: "Tester" },

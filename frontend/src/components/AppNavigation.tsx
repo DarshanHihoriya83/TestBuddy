@@ -102,7 +102,13 @@ export function NavDrawer() {
 
   const navItems = useMemo(() => {
     const items: { to: string; label: string; match: (path: string) => boolean }[] = [
-      ...BASE_NAV,
+      ...BASE_NAV.filter(
+        (item) =>
+          !(
+            isSuperAdmin(user) &&
+            (item.to === "/bugs" || item.to === "/projects")
+          ),
+      ),
     ];
     // After Home — SuperAdmin only
     if (isSuperAdmin(user)) {
