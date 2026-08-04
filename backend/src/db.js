@@ -45,6 +45,7 @@ export async function ensureSchema() {
     CREATE TABLE IF NOT EXISTS projects (
       id UUID PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
+      description VARCHAR(4000),
       jira_project_key VARCHAR(255),
       ado_org_url VARCHAR(255),
       ado_project VARCHAR(255)
@@ -126,6 +127,7 @@ export async function ensureSchema() {
       id UUID PRIMARY KEY,
       project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       name VARCHAR(255) NOT NULL,
+      description VARCHAR(4000),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
@@ -141,6 +143,16 @@ export async function ensureSchema() {
   await query(`
     ALTER TABLE users
     ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true
+  `);
+
+  await query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS description VARCHAR(4000)
+  `);
+
+  await query(`
+    ALTER TABLE modules
+    ADD COLUMN IF NOT EXISTS description VARCHAR(4000)
   `);
 
   // Backfill organization_id on projects, then enforce NOT NULL

@@ -28,6 +28,7 @@ export interface User {
 export interface Project {
   id: string;
   name: string;
+  description?: string;
   organizationId?: string;
   jiraProjectKey?: string;
   adoOrgUrl?: string;
@@ -47,6 +48,7 @@ export interface Module {
   id: string;
   projectId: string;
   name: string;
+  description?: string;
   createdAt?: string;
 }
 

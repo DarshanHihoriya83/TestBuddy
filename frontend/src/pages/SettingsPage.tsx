@@ -14,8 +14,8 @@ import {
 } from "../api";
 import { useAuth } from "../auth";
 import { FlashAlert } from "../components/FlashAlert";
-import { MemberList, MemberPicker } from "../components/MemberPicker";
 import { PageHeader } from "../components/PageHeader";
+import { ProjectMembersPanel } from "../components/project/ProjectMembersPanel";
 import { QueryStatus } from "../components/QueryStatus";
 import { Shell } from "../components/Shell";
 import { queryKeys } from "../queryKeys";
@@ -32,7 +32,7 @@ import {
   validateRequiredPasswordChange,
 } from "../utils/validation";
 
-type Section = "profile" | "password" | "projects" | "reset";
+type Section = "profile" | "password" | "members" | "reset";
 
 export function SettingsPage() {
   const { user, updateUser, token } = useAuth();
@@ -45,7 +45,7 @@ export function SettingsPage() {
     const items: { id: Section; label: string }[] = [
       { id: "profile", label: "Profile" },
       { id: "password", label: "Change password" },
-      { id: "projects", label: "Project Access" },
+      { id: "members", label: "Members" },
     ];
     if (canReset) items.push({ id: "reset", label: "Reset password" });
     return items;
@@ -57,7 +57,7 @@ export function SettingsPage() {
 
   return (
     <Shell title="Settings">
-      <PageHeader description="Manage your account, project access, and team passwords." />
+      <PageHeader description="Manage your account, project members, and team passwords." />
 
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
         <nav
@@ -83,8 +83,8 @@ export function SettingsPage() {
         <div className="min-w-0 flex-1">
           {section === "profile" && <ProfileSection token={!!token} updateUser={updateUser} user={user} />}
           {section === "password" && <ChangePasswordSection updateUser={updateUser} user={user} />}
-          {section === "projects" && (
-            <ProjectAccessSection canManage={canMembers} currentUserId={user?.id} />
+          {section === "members" && (
+            <MembersSection canManage={canMembers} currentUserId={user?.id} />
           )}
           {section === "reset" && canReset && <ResetPasswordSection me={user} />}
         </div>
@@ -300,7 +300,7 @@ function ChangePasswordSection({
   );
 }
 
-function ProjectAccessSection({
+function MembersSection({
   canManage,
   currentUserId,
 }: {
@@ -308,6 +308,7 @@ function ProjectAccessSection({
   currentUserId?: string;
 }) {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [addUserId, setAddUserId] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -327,7 +328,7 @@ function ProjectAccessSection({
   const membersQuery = useQuery({
     queryKey: queryKeys.projectMembers(selectedProjectId || "_"),
     queryFn: () => fetchProjectMembers(selectedProjectId),
-    enabled: !!selectedProjectId && canManage,
+    enabled: !!selectedProjectId,
   });
 
   const usersQuery = useQuery({
@@ -350,6 +351,7 @@ function ProjectAccessSection({
       setError(null);
       await queryClient.invalidateQueries({ queryKey: ["project-members"] });
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      await queryClient.invalidateQueries({ queryKey: ["users-admin"] });
     },
     onError: (err: Error) => {
       setError(err.message);
@@ -364,6 +366,7 @@ function ProjectAccessSection({
       setError(null);
       await queryClient.invalidateQueries({ queryKey: ["project-members"] });
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      await queryClient.invalidateQueries({ queryKey: ["users-admin"] });
     },
     onError: (err: Error) => {
       setError(err.message);
@@ -371,13 +374,15 @@ function ProjectAccessSection({
     },
   });
 
+  const selectedProject = projects.find((p) => p.id === selectedProjectId);
+
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-bold text-[var(--ink)]">Project Access</h2>
+        <h2 className="text-lg font-bold text-[var(--ink)]">Members</h2>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          Projects you can access
-          {canManage ? ". Add or remove members on a selected project." : "."}
+          Select a project to view
+          {canManage ? " and manage" : ""} its members.
         </p>
       </div>
 
@@ -407,6 +412,7 @@ function ProjectAccessSection({
                 }`}
                 onClick={() => {
                   setSelectedProjectId(p.id);
+                  setAddUserId("");
                   setError(null);
                   setMessage(null);
                 }}
@@ -425,36 +431,24 @@ function ProjectAccessSection({
         </ul>
       )}
 
-      {canManage && selectedProjectId && (
-        <section className="tb-card space-y-4 p-5">
-          <h3 className="text-base font-bold text-[var(--ink)]">
-            Members
-            <span className="ml-2 text-sm font-semibold text-[var(--muted)]">
-              ({members.length})
-            </span>
-          </h3>
-          <FlashAlert error={error} message={message} className="" />
-          <MemberPicker
-            addableUsers={addableUsers}
-            value={addUserId}
-            onChange={setAddUserId}
-            onAdd={() => addMutation.mutate(addUserId)}
-            busy={addMutation.isPending}
-          />
-          <QueryStatus
-            isLoading={membersQuery.isLoading}
-            error={membersQuery.error}
-            onRetry={() => void membersQuery.refetch()}
-            loadingText="Loading members…"
-          />
-          <MemberList
-            members={members}
-            currentUserId={currentUserId}
-            canRemove
-            removing={removeMutation.isPending}
-            onRemove={(userId) => removeMutation.mutate(userId)}
-          />
-        </section>
+      {selectedProjectId && selectedProject && (
+        <ProjectMembersPanel
+          members={members}
+          addableUsers={addableUsers}
+          currentUserId={currentUserId}
+          canManage={canManage}
+          showUsersLink={canTransferRoles(user)}
+          addUserId={addUserId}
+          onAddUserIdChange={setAddUserId}
+          onAdd={() => addMutation.mutate(addUserId)}
+          adding={addMutation.isPending}
+          onRemove={(userId) => removeMutation.mutate(userId)}
+          removing={removeMutation.isPending}
+          loading={membersQuery.isLoading}
+          error={error}
+          message={message}
+          listError={membersQuery.error as Error | null}
+        />
       )}
     </div>
   );

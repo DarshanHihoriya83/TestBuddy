@@ -188,6 +188,7 @@ export const fetchProject = (id: string) => api<ProjectDetail>(`/api/projects/${
 export type ProjectPayload = {
   name: string;
   organizationId: string;
+  description?: string;
   jiraProjectKey?: string;
   adoOrgUrl?: string;
   adoProject?: string;
@@ -246,14 +247,14 @@ export function removeOrganizationMember(organizationId: string, userId: string)
 export const fetchModules = (projectId: string) =>
   api<Module[]>(`/api/projects/${projectId}/modules`);
 
-export function createModule(projectId: string, body: { name: string }) {
+export function createModule(projectId: string, body: { name: string; description?: string }) {
   return api<Module>(`/api/projects/${projectId}/modules`, {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
-export function updateModule(id: string, body: { name: string }) {
+export function updateModule(id: string, body: { name: string; description?: string }) {
   return api<Module>(`/api/modules/${id}`, {
     method: "PUT",
     body: JSON.stringify(body),

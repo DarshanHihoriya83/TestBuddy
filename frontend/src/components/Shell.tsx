@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { TopNavBar } from "./AppNavigation";
+import { AppSidebar, PageBreadcrumb } from "./AppNavigation";
 
 export function Shell({
   title,
@@ -11,14 +11,17 @@ export function Shell({
   children: ReactNode;
 }) {
   return (
-    <div className="min-h-screen">
-      <TopNavBar title={title} />
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        {actions ? (
-          <div className="mb-4 flex flex-wrap items-center justify-end gap-2">{actions}</div>
-        ) : null}
-        {children}
-      </main>
+    <div className="flex h-screen overflow-hidden">
+      <AppSidebar />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <main className="flex min-h-0 w-full flex-1 flex-col overflow-hidden px-5 py-3">
+          <PageBreadcrumb title={title} />
+          {actions ? (
+            <div className="mb-3 flex shrink-0 flex-wrap items-center justify-end gap-2">{actions}</div>
+          ) : null}
+          <div className="flex min-h-0 flex-1 flex-col overflow-auto">{children}</div>
+        </main>
+      </div>
     </div>
   );
 }

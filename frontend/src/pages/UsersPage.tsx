@@ -396,7 +396,7 @@ export function UsersPage() {
             </p>
             <p className="mt-1 text-sm text-[var(--muted)]">
               {projectFilter
-                ? "Add members from the project page, or create a user assigned to this project."
+                ? "Add members from Settings → Members, or create a user assigned to this project."
                 : "Try another role/status, or clear search."}
             </p>
             {filtersDirty && (

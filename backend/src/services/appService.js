@@ -58,6 +58,7 @@ function toProjectDto(project) {
   return {
     id: project.id,
     name: project.name,
+    description: project.description ?? null,
     organizationId: project.organization_id ?? project.organizationId ?? null,
     jiraProjectKey: project.jira_project_key ?? project.jiraProjectKey ?? null,
     adoOrgUrl: project.ado_org_url ?? project.adoOrgUrl ?? null,
@@ -78,6 +79,7 @@ function toModuleDto(mod) {
     id: mod.id,
     projectId: mod.project_id,
     name: mod.name,
+    description: mod.description ?? null,
     createdAt: mod.created_at,
   };
 }
@@ -944,7 +946,7 @@ export async function getProject(actor, id) {
   };
 }
 
-export async function createProject(actor, { name, organizationId, jiraProjectKey, adoOrgUrl, adoProject }) {
+export async function createProject(actor, { name, organizationId, description, jiraProjectKey, adoOrgUrl, adoProject }) {
   if (!canCreateProject(actor)) {
     throw forbidden("Only Admin or Manager can create projects");
   }
@@ -959,12 +961,13 @@ export async function createProject(actor, { name, organizationId, jiraProjectKe
   return withTransaction(async (client) => {
     const id = randomUUID();
     const { rows } = await client.query(
-      `INSERT INTO projects (id, name, jira_project_key, ado_org_url, ado_project, organization_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO projects (id, name, description, jira_project_key, ado_org_url, ado_project, organization_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
       [
         id,
         name.trim(),
+        blankToNull(description),
         blankToNull(jiraProjectKey),
         blankToNull(adoOrgUrl),
         blankToNull(adoProject),
@@ -985,17 +988,24 @@ export async function createProject(actor, { name, organizationId, jiraProjectKe
   });
 }
 
-export async function updateProject(actor, id, { name, jiraProjectKey, adoOrgUrl, adoProject }) {
+export async function updateProject(actor, id, { name, description, jiraProjectKey, adoOrgUrl, adoProject }) {
   await assertCanManageProject(actor, id);
   if (!name || String(name).trim().length < 2) {
     throw badRequest("Project name must be at least 2 characters");
   }
   const { rows } = await query(
     `UPDATE projects
-     SET name = $1, jira_project_key = $2, ado_org_url = $3, ado_project = $4
-     WHERE id = $5
+     SET name = $1, description = $2, jira_project_key = $3, ado_org_url = $4, ado_project = $5
+     WHERE id = $6
      RETURNING *`,
-    [name.trim(), blankToNull(jiraProjectKey), blankToNull(adoOrgUrl), blankToNull(adoProject), id],
+    [
+      name.trim(),
+      blankToNull(description),
+      blankToNull(jiraProjectKey),
+      blankToNull(adoOrgUrl),
+      blankToNull(adoProject),
+      id,
+    ],
   );
   return toProjectDto(rows[0]);
 }
@@ -1009,7 +1019,7 @@ export async function listModules(actor, projectId) {
   return rows.map(toModuleDto);
 }
 
-export async function createModule(actor, projectId, { name }) {
+export async function createModule(actor, projectId, { name, description }) {
   if (!canManageModules(actor)) {
     throw forbidden("You cannot manage modules");
   }
@@ -1019,14 +1029,14 @@ export async function createModule(actor, projectId, { name }) {
   }
   const id = randomUUID();
   const { rows } = await query(
-    `INSERT INTO modules (id, project_id, name, created_at)
-     VALUES ($1, $2, $3, NOW()) RETURNING *`,
-    [id, projectId, String(name).trim()],
+    `INSERT INTO modules (id, project_id, name, description, created_at)
+     VALUES ($1, $2, $3, $4, NOW()) RETURNING *`,
+    [id, projectId, String(name).trim(), blankToNull(description)],
   );
   return toModuleDto(rows[0]);
 }
 
-export async function updateModule(actor, id, { name }) {
+export async function updateModule(actor, id, { name, description }) {
   if (!canManageModules(actor)) {
     throw forbidden("You cannot manage modules");
   }
@@ -1035,10 +1045,16 @@ export async function updateModule(actor, id, { name }) {
   if (!name || String(name).trim().length < 1) {
     throw badRequest("Module name is required");
   }
-  const { rows } = await query(
-    `UPDATE modules SET name = $1 WHERE id = $2 RETURNING *`,
-    [String(name).trim(), id],
-  );
+  const { rows } =
+    description !== undefined
+      ? await query(
+          `UPDATE modules SET name = $1, description = $2 WHERE id = $3 RETURNING *`,
+          [String(name).trim(), blankToNull(description), id],
+        )
+      : await query(`UPDATE modules SET name = $1 WHERE id = $2 RETURNING *`, [
+          String(name).trim(),
+          id,
+        ]);
   return toModuleDto(rows[0]);
 }
 

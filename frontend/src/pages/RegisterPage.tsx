@@ -2,7 +2,6 @@ import { useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { register } from "../api";
 import { useAuth } from "../auth";
-import { TopNavBar } from "../components/AppNavigation";
 import { validateEmail, validateName } from "../utils/validation";
 
 export function RegisterPage() {
@@ -66,7 +65,6 @@ export function RegisterPage() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <TopNavBar title="Register" />
       <div className="grid min-h-0 flex-1 lg:grid-cols-2">
         <div className="relative hidden flex-col justify-between bg-[var(--accent)] p-10 text-white lg:flex">
           <div>

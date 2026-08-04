@@ -45,7 +45,7 @@ export function ProjectMembersPanel({
             <span className="ml-2 text-sm font-semibold text-[var(--muted)]">({members.length})</span>
           </h3>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Users assigned to this project — filterable from the Users page too.
+            Users assigned to this project.
           </p>
         </div>
         {showUsersLink ? (

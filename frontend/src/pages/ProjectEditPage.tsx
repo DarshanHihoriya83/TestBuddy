@@ -4,6 +4,7 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { fetchProject, updateProject } from "../api";
 import { useAuth } from "../auth";
 import { Shell } from "../components/Shell";
+import { notifyError, notifySuccess } from "../utils/notify";
 import { canCreateProject } from "../utils/roles";
 import { validateName, validateOptionalUrl } from "../utils/validation";
 
@@ -21,14 +22,15 @@ export function ProjectEditPage() {
   });
 
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [jiraProjectKey, setJiraProjectKey] = useState("");
   const [adoOrgUrl, setAdoOrgUrl] = useState("");
   const [adoProject, setAdoProject] = useState("");
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectQuery.data) return;
     setName(projectQuery.data.name);
+    setDescription(projectQuery.data.description ?? "");
     setJiraProjectKey(projectQuery.data.jiraProjectKey ?? "");
     setAdoOrgUrl(projectQuery.data.adoOrgUrl ?? "");
     setAdoProject(projectQuery.data.adoProject ?? "");
@@ -38,6 +40,7 @@ export function ProjectEditPage() {
     mutationFn: () =>
       updateProject(id, {
         name: name.trim(),
+        description: description.trim() || undefined,
         jiraProjectKey: jiraProjectKey.trim() || undefined,
         adoOrgUrl: adoOrgUrl.trim() || undefined,
         adoProject: adoProject.trim() || undefined,
@@ -45,9 +48,10 @@ export function ProjectEditPage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
       await queryClient.invalidateQueries({ queryKey: ["project", id] });
+      notifySuccess("Project updated");
       navigate(`/projects/${id}`);
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => notifyError(err.message),
   });
 
   if (!canManage) {
@@ -55,15 +59,14 @@ export function ProjectEditPage() {
   }
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setError(null);
     const nameErr = validateName(name);
     if (nameErr) {
-      setError(nameErr);
+      notifyError(nameErr);
       return;
     }
     const urlErr = validateOptionalUrl(adoOrgUrl, "Azure DevOps org URL");
     if (urlErr) {
-      setError(urlErr);
+      notifyError(urlErr);
       return;
     }
     saveMutation.mutate();
@@ -87,6 +90,16 @@ export function ProjectEditPage() {
             <input className="tb-input" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
           </label>
           <label className="tb-label">
+            Description
+            <textarea
+              className="tb-textarea"
+              rows={3}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g, Describe the project details"
+            />
+          </label>
+          <label className="tb-label">
             Jira project key
             <input className="tb-input" value={jiraProjectKey} onChange={(e) => setJiraProjectKey(e.target.value)} />
           </label>
@@ -98,8 +111,6 @@ export function ProjectEditPage() {
             Azure DevOps project
             <input className="tb-input" value={adoProject} onChange={(e) => setAdoProject(e.target.value)} />
           </label>
-
-          {error && <p className="tb-alert-error">{error}</p>}
 
           <div className="flex gap-3">
             <button type="submit" disabled={saveMutation.isPending || !name.trim()} className="tb-btn-primary">

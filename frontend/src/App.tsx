@@ -1,6 +1,8 @@
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useEffect, type ReactNode } from "react";
+import { ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 import { AuthProvider, useAuth } from "./auth";
 import { BugDetailPage } from "./pages/BugDetailPage";
 import { BugsPage } from "./pages/BugsPage";
@@ -14,7 +16,7 @@ import { ProjectsPage } from "./pages/ProjectsPage";
 import { UsersPage } from "./pages/UsersPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
-import { NavDrawer, NavProvider } from "./components/AppNavigation";
+import { NavProvider } from "./components/AppNavigation";
 import { canTransferRoles, isSuperAdmin } from "./utils/roles";
 import { OrganizationsPage } from "./pages/OrganizationsPage";
 import { OrganizationDetailPage } from "./pages/OrganizationDetailPage";
@@ -89,7 +91,6 @@ export default function App() {
         <AuthQueryBridge>
           <BrowserRouter>
             <NavProvider>
-              <NavDrawer />
               <Routes>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/login" element={<LoginPage />} />
@@ -190,6 +191,16 @@ export default function App() {
                 />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
+              <ToastContainer
+                position="top-right"
+                autoClose={3500}
+                newestOnTop
+                closeOnClick
+                pauseOnHover
+                draggable
+                theme="light"
+                toastClassName="tb-toastify"
+              />
             </NavProvider>
           </BrowserRouter>
         </AuthQueryBridge>

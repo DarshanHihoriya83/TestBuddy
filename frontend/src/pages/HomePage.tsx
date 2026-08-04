@@ -20,7 +20,7 @@ export function HomePage() {
             }}
           />
 
-          <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-4 py-12 sm:px-6 lg:grid-cols-2 lg:px-8 lg:py-16">
+          <div className="relative grid w-full items-center gap-12 py-12 lg:grid-cols-2 lg:py-16">
             <div>
               <span className="tb-badge">Browser extension + dashboard</span>
               <h1 className="mt-4 text-4xl font-extrabold leading-tight tracking-tight text-[var(--ink)] sm:text-5xl">
