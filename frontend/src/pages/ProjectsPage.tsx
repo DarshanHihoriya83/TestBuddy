@@ -1,8 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import { createProject, deleteProject, fetchBugs, fetchCycles, fetchOrganizations, fetchProjects, updateProject } from "../api";
+import {
+  createProject,
+  deleteProject,
+  fetchBugs,
+  fetchCycles,
+  fetchOrganizations,
+  fetchProjectQuota,
+  fetchProjects,
+  updateProject,
+} from "../api";
 import { useAuth } from "../auth";
 import { QueryStatus } from "../components/QueryStatus";
 import { Shell } from "../components/Shell";
@@ -10,8 +19,13 @@ import { StatCard } from "../components/StatCard";
 import { queryKeys } from "../queryKeys";
 import type { Project } from "../types";
 import { notifyError, notifySuccess } from "../utils/notify";
-import { canCreateProject } from "../utils/roles";
-import { validateName, validateOptionalUrl } from "../utils/validation";
+import { canCreateProject, isManager } from "../utils/roles";
+import {
+  normalizeProjectName,
+  PROJECT_NAME_MAX_LENGTH,
+  validateOptionalUrl,
+  validateProjectName,
+} from "../utils/validation";
 
 type ViewMode = "list" | "grid";
 
@@ -200,14 +214,14 @@ function KebabMenu({
   );
 }
 
-function pageNumbers(current: number, total: number): (number | "…")[] {
+function pageNumbers(current: number, total: number): (number | "?")[] {
   if (total <= 5) return Array.from({ length: total }, (_, i) => i + 1);
-  const pages: (number | "…")[] = [1];
-  if (current > 3) pages.push("…");
+  const pages: (number | "?")[] = [1];
+  if (current > 3) pages.push("?");
   for (let p = Math.max(2, current - 1); p <= Math.min(total - 1, current + 1); p++) {
     pages.push(p);
   }
-  if (current < total - 2) pages.push("…");
+  if (current < total - 2) pages.push("?");
   pages.push(total);
   return pages;
 }
@@ -326,6 +340,7 @@ function PageSizeSelect({
 export function ProjectsPage() {
   const { user } = useAuth();
   const canManage = canCreateProject(user);
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const projectsQuery = useQuery({
     queryKey: queryKeys.projects(),
@@ -334,6 +349,11 @@ export function ProjectsPage() {
   const orgsQuery = useQuery({
     queryKey: queryKeys.organizations,
     queryFn: fetchOrganizations,
+  });
+  const quotaQuery = useQuery({
+    queryKey: queryKeys.projectQuota,
+    queryFn: fetchProjectQuota,
+    enabled: canManage,
   });
   const bugsQuery = useQuery({
     queryKey: queryKeys.bugs(),
@@ -348,7 +368,9 @@ export function ProjectsPage() {
   });
 
   const [name, setName] = useState("");
+  const [nameHint, setNameHint] = useState<string | null>(null);
   const [description, setDescription] = useState("");
+  const [organizationId, setOrganizationId] = useState("");
   const [jiraProjectKey, setJiraProjectKey] = useState("");
   const [adoOrgUrl, setAdoOrgUrl] = useState("");
   const [adoProject, setAdoProject] = useState("");
@@ -373,7 +395,18 @@ export function ProjectsPage() {
     return map;
   }, [orgs]);
 
-  const defaultOrgId = orgs[0]?.id || "";
+  const defaultOrgId = organizationId || orgs[0]?.id || "";
+  const quota = quotaQuery.data;
+  const atLimit =
+    isManager(user) &&
+    quota?.limit != null &&
+    typeof quota.remaining === "number" &&
+    quota.remaining <= 0;
+
+  useEffect(() => {
+    const fromQuery = searchParams.get("organizationId")?.trim();
+    if (fromQuery) setOrganizationId(fromQuery);
+  }, [searchParams]);
 
   const stats = useMemo(() => {
     const projectCount = projectsQuery.data?.length ?? 0;
@@ -384,7 +417,7 @@ export function ProjectsPage() {
     const cycleName =
       cyclesQuery.data?.find((c) => c.isDefault)?.name ??
       cyclesQuery.data?.[0]?.name ??
-      "—";
+      "?";
     return { projectCount, activeBugs, teamMembers, cycleName };
   }, [projectsQuery.data, bugsQuery.data, orgs, cyclesQuery.data]);
 
@@ -396,10 +429,12 @@ export function ProjectsPage() {
       setJiraProjectKey("");
       setAdoOrgUrl("");
       setAdoProject("");
+      setNameHint(null);
       setCreateOpen(false);
       notifySuccess("Project created (Cycle 1 added as default)");
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
       await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectQuota });
     },
     onError: (err: Error) => {
       notifyError(err.message);
@@ -413,6 +448,7 @@ export function ProjectsPage() {
       notifySuccess("Project deleted");
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
       await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projectQuota });
     },
     onError: (err: Error) => {
       notifyError(err.message);
@@ -422,7 +458,7 @@ export function ProjectsPage() {
   const updateMutation = useMutation({
     mutationFn: () =>
       updateProject(editProject!.id, {
-        name: editName.trim(),
+        name: normalizeProjectName(editName),
         description: editDescription.trim() || undefined,
         jiraProjectKey: editJiraProjectKey.trim() || undefined,
         adoOrgUrl: editAdoOrgUrl.trim() || undefined,
@@ -461,8 +497,15 @@ export function ProjectsPage() {
 
   function submitCreate(e: FormEvent) {
     e.preventDefault();
-    const nameErr = validateName(name);
+    if (atLimit) {
+      notifyError(`Project limit reached: Managers can create at most ${quota?.limit} projects.`);
+      return;
+    }
+    const normalized = normalizeProjectName(name);
+    setName(normalized);
+    const nameErr = validateProjectName(normalized);
     if (nameErr) {
+      setNameHint(nameErr);
       notifyError(nameErr);
       return;
     }
@@ -477,7 +520,7 @@ export function ProjectsPage() {
       return;
     }
     createMutation.mutate({
-      name: name.trim(),
+      name: normalized,
       organizationId: orgId,
       description: description.trim() || undefined,
       jiraProjectKey: jiraProjectKey.trim() || undefined,
@@ -498,7 +541,9 @@ export function ProjectsPage() {
   function submitEdit(e: FormEvent) {
     e.preventDefault();
     if (!editProject) return;
-    const nameErr = validateName(editName);
+    const normalized = normalizeProjectName(editName);
+    setEditName(normalized);
+    const nameErr = validateProjectName(normalized);
     if (nameErr) {
       notifyError(nameErr);
       return;
@@ -563,7 +608,7 @@ export function ProjectsPage() {
         />
         <StatCard
           label="Team Members"
-          value={stats.teamMembers || "—"}
+          value={stats.teamMembers || "?"}
           accent="purple"
           icon={
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -599,30 +644,89 @@ export function ProjectsPage() {
             className="tb-card tb-modal-panel max-w-lg p-5"
           >
             <div className="flex items-start justify-between gap-3">
-              <h2 id="create-project-title" className="text-lg font-semibold text-[var(--ink)]">
-                Create project
-              </h2>
+              <div className="min-w-0">
+                <h2 id="create-project-title" className="text-lg font-semibold text-[var(--ink)]">
+                  Create project
+                </h2>
+                {isManager(user) && quota?.limit != null && (
+                  <p
+                    className={`mt-1 text-xs font-medium ${
+                      atLimit ? "text-[var(--danger)]" : "text-[var(--muted)]"
+                    }`}
+                  >
+                    Your quota: {quota.used}/{quota.limit} projects
+                    {typeof quota.remaining === "number" ? ` ? ${quota.remaining} left` : ""}
+                  </p>
+                )}
+              </div>
               <button
                 type="button"
                 className="tb-btn-icon h-9 w-9"
                 aria-label="Close"
                 onClick={() => setCreateOpen(false)}
               >
-                ×
+                ?
               </button>
             </div>
+            {atLimit && (
+              <p className="mt-2 text-sm text-[var(--danger)]">
+                You have reached the maximum number of projects you can create. Delete an existing
+                project or ask a SuperAdmin for help.
+              </p>
+            )}
             <form className="mt-4" onSubmit={submitCreate}>
               <div className="grid gap-3">
+                <label className="tb-label">
+                  Organization *
+                  <select
+                    className="tb-select"
+                    value={defaultOrgId}
+                    onChange={(e) => setOrganizationId(e.target.value)}
+                    required
+                    disabled={atLimit}
+                  >
+                    {orgs.length === 0 && <option value="">No organizations</option>}
+                    {orgs.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="tb-label">
                   Name *
                   <input
                     className="tb-input"
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g, Chaudhari"
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const next =
+                        raw.length > PROJECT_NAME_MAX_LENGTH
+                          ? raw.slice(0, PROJECT_NAME_MAX_LENGTH)
+                          : raw;
+                      setName(next);
+                      setNameHint(next.trim() ? validateProjectName(next) : null);
+                    }}
+                    onBlur={() => {
+                      const normalized = normalizeProjectName(name);
+                      setName(normalized);
+                      setNameHint(normalized ? validateProjectName(normalized) : null);
+                    }}
+                    placeholder="Letters and spaces only"
                     required
                     minLength={2}
+                    maxLength={PROJECT_NAME_MAX_LENGTH}
+                    disabled={atLimit}
+                    aria-invalid={!!nameHint}
                   />
+                  <span className="mt-1 flex justify-between gap-2 text-[11px] font-normal normal-case tracking-normal">
+                    <span className={nameHint ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
+                      {nameHint || "Alphabetical characters only ? max 100 characters"}
+                    </span>
+                    <span className="shrink-0 text-[var(--muted)]">
+                      {normalizeProjectName(name).length}/{PROJECT_NAME_MAX_LENGTH}
+                    </span>
+                  </span>
                 </label>
                 <label className="tb-label">
                   Description
@@ -632,6 +736,7 @@ export function ProjectsPage() {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="e.g, Describe the project details"
+                    disabled={atLimit}
                   />
                 </label>
                 <label className="tb-label">
@@ -641,6 +746,7 @@ export function ProjectsPage() {
                     value={jiraProjectKey}
                     onChange={(e) => setJiraProjectKey(e.target.value)}
                     placeholder="e.g. TB"
+                    disabled={atLimit}
                   />
                 </label>
                 <label className="tb-label">
@@ -650,6 +756,7 @@ export function ProjectsPage() {
                     value={adoOrgUrl}
                     onChange={(e) => setAdoOrgUrl(e.target.value)}
                     placeholder="https://dev.azure.com/org"
+                    disabled={atLimit}
                   />
                 </label>
                 <label className="tb-label">
@@ -659,6 +766,7 @@ export function ProjectsPage() {
                     value={adoProject}
                     onChange={(e) => setAdoProject(e.target.value)}
                     placeholder="e.g, Demo"
+                    disabled={atLimit}
                   />
                 </label>
               </div>
@@ -668,10 +776,16 @@ export function ProjectsPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={createMutation.isPending || !name.trim() || !orgs.length}
+                  disabled={
+                    createMutation.isPending ||
+                    atLimit ||
+                    !normalizeProjectName(name) ||
+                    !!validateProjectName(name) ||
+                    !orgs.length
+                  }
                   className="tb-btn-primary"
                 >
-                  {createMutation.isPending ? "Creating…" : "Create project"}
+                  {createMutation.isPending ? "Creating..." : "Create project"}
                 </button>
               </div>
             </form>
@@ -702,7 +816,7 @@ export function ProjectsPage() {
                 aria-label="Close"
                 onClick={() => setEditProject(null)}
               >
-                ×
+                ?
               </button>
             </div>
             <form className="mt-4" onSubmit={submitEdit}>
@@ -765,7 +879,7 @@ export function ProjectsPage() {
                   disabled={updateMutation.isPending || !editName.trim()}
                   className="tb-btn-primary"
                 >
-                  {updateMutation.isPending ? "Saving…" : "Save changes"}
+                  {updateMutation.isPending ? "Saving..." : "Save changes"}
                 </button>
               </div>
             </form>
@@ -825,7 +939,7 @@ export function ProjectsPage() {
                 className="inline-flex items-center justify-center rounded-xl border border-red-200 bg-[var(--danger)] px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-55"
                 onClick={submitDelete}
               >
-                {deleteMutation.isPending ? "Deleting…" : "Delete project"}
+                {deleteMutation.isPending ? "Deleting..." : "Delete project"}
               </button>
             </div>
           </div>
@@ -836,7 +950,7 @@ export function ProjectsPage() {
         isLoading={projectsQuery.isLoading}
         error={projectsQuery.error}
         onRetry={() => void projectsQuery.refetch()}
-        loadingText="Loading projects…"
+        loadingText="Loading projects?"
       />
 
       {!projectsQuery.isLoading && !projectsQuery.error && (
@@ -919,14 +1033,14 @@ export function ProjectsPage() {
                           </div>
                         </td>
                         <td className="tb-table-col tb-table-col-jira text-[var(--ink)]">
-                          {project.jiraProjectKey || "—"}
+                          {project.jiraProjectKey || "?"}
                         </td>
                         <td className="tb-table-col tb-table-col-ado text-[var(--ink)]">
-                          {project.adoProject || "—"}
+                          {project.adoProject || "?"}
                         </td>
                         <td className="tb-table-col-date">
                           <div className="tb-table-date-cell text-[var(--muted)]">
-                            <CalendarIcon /> —
+                            <CalendarIcon /> ?
                           </div>
                         </td>
                         <td className="tb-table-actions-col">
@@ -979,11 +1093,11 @@ export function ProjectsPage() {
                     <dl className="mt-3 space-y-1 text-xs text-[var(--muted)]">
                       <div className="flex justify-between gap-2">
                         <dt>Jira</dt>
-                        <dd className="text-[var(--ink)]">{project.jiraProjectKey || "—"}</dd>
+                        <dd className="text-[var(--ink)]">{project.jiraProjectKey || "?"}</dd>
                       </div>
                       <div className="flex justify-between gap-2">
                         <dt>ADO</dt>
-                        <dd className="truncate text-[var(--ink)]">{project.adoProject || "—"}</dd>
+                        <dd className="truncate text-[var(--ink)]">{project.adoProject || "?"}</dd>
                       </div>
                     </dl>
                   </div>
@@ -1007,12 +1121,12 @@ export function ProjectsPage() {
                 aria-label="Previous page"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
               >
-                ‹
+                ?
               </button>
               {pageNumbers(safePage, totalPages).map((p, i) =>
-                p === "…" ? (
+                p === "?" ? (
                   <span key={`e-${i}`} className="px-1 text-sm text-[var(--muted)]">
-                    …
+                    ?
                   </span>
                 ) : (
                   <button
@@ -1032,7 +1146,7 @@ export function ProjectsPage() {
                 aria-label="Next page"
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               >
-                ›
+                ?
               </button>
             </div>
             <div className="inline-flex items-center gap-2 text-sm text-[var(--muted)]">

@@ -127,7 +127,6 @@ export async function seedIfEmpty() {
     const passwordHash = await bcrypt.hash("password", 12);
     const users = [
       ["Super Admin", "superadmin@testbuddy.local", "SUPERADMIN"],
-      ["Admin User", "admin@testbuddy.local", "ADMIN"],
       ["Alice Tester", "alice@testbuddy.local", "TESTER"],
       ["Bob Developer", "bob@testbuddy.local", "DEVELOPER"],
       ["Carol Manager", "carol@testbuddy.local", "MANAGER"],

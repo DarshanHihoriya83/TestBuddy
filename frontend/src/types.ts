@@ -1,4 +1,4 @@
-export type UserRole = "SUPERADMIN" | "ADMIN" | "TESTER" | "DEVELOPER" | "MANAGER";
+export type UserRole = "SUPERADMIN" | "TESTER" | "DEVELOPER" | "MANAGER";
 export type BugPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type BugSeverity = "MINOR" | "MAJOR" | "CRITICAL" | "BLOCKER";
 export type BugStatus =
@@ -33,6 +33,14 @@ export interface Project {
   jiraProjectKey?: string;
   adoOrgUrl?: string;
   adoProject?: string;
+  createdBy?: string | null;
+}
+
+export interface ProjectCreationQuota {
+  role: string;
+  limit: number | null;
+  used: number;
+  remaining: number | null;
 }
 
 export interface Organization {

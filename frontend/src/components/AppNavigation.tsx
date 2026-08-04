@@ -66,7 +66,10 @@ function NavIcon({ name }: { name: string }) {
 }
 
 function buildNavItems(user: ReturnType<typeof useAuth>["user"]): NavItem[] {
-  const items: NavItem[] = BASE_NAV.map((item) => ({
+  const items: NavItem[] = BASE_NAV.filter(
+    (item) =>
+      !(isSuperAdmin(user) && (item.to === "/bugs" || item.to === "/projects")),
+  ).map((item) => ({
     ...item,
     icon: <NavIcon name={item.label} />,
   }));

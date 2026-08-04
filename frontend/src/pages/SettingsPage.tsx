@@ -516,10 +516,8 @@ function ResetPasswordSection({ me }: { me: User | null }) {
         <p className="mt-1 text-sm text-[var(--muted)]">
           Set a temporary password for users you manage
           {me?.role === "MANAGER"
-            ? " (Developer, Tester)."
-            : me?.role === "ADMIN"
-              ? " (Manager, Developer, Tester)."
-              : " (any role)."}
+            ? " (Manager, Developer, Tester)."
+            : " (any role)."}
         </p>
       </div>
 

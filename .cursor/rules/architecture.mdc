@@ -46,7 +46,7 @@ Frontend dashboard ──► same Node Backend
 
 Mirror these in the Node backend (DB rows / mappers) and as TypeScript interfaces (frontend + extension):
 
-- `User` — roles: SUPERADMIN | ADMIN | MANAGER | DEVELOPER | TESTER
+- `User` — roles: SUPERADMIN | MANAGER | DEVELOPER | TESTER
 - `Organization` — name; members via `organization_members`
 - `Project` — organizationId required; optional jiraProjectKey, adoOrgUrl, adoProject
 - `Module` — projectId, name (feature area for bugs)
@@ -61,10 +61,13 @@ Mirror these in the Node backend (DB rows / mappers) and as TypeScript interface
 
 - **Extension login / create-bug UI:** TESTER only
 - **Organizations:** SuperAdmin create/manage; members see their orgs
-- **Projects:** SuperAdmin | Admin | Manager create (must belong to org)
-- **Modules / create bug:** includes Tester
-- **Bug status + comments:** Developer and Tester (plus Admin/Manager/SuperAdmin)
-- **Role transfer:** SuperAdmin | Admin | Manager only (Manager: Developer ↔ Tester)
+- **Org members:** SuperAdmin | Manager
+- **Projects:** SuperAdmin | Manager create (must belong to org); Manager capped by `MAX_PROJECTS_PER_MANAGER` (default 10)
+- **Project visibility:** Manager sees all projects in their org(s); Developer/Tester only projects where added to `project_members` (Manager must grant access)
+- **Project members:** SuperAdmin | Manager add/remove; target user must be an org member first
+- **Modules / create bug:** includes Tester (on accessible projects only)
+- **Bug status + comments:** Developer and Tester (plus Manager/SuperAdmin)
+- **User CRUD / role assign:** SuperAdmin | Manager (Manager: Manager/Developer/Tester)
 - **User hard-delete:** SuperAdmin, only after deactivate
 
 ## API surface (owned by backend)

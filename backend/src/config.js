@@ -17,6 +17,8 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || defaultJwtSecret,
   jwtExpirationMs: Number(process.env.JWT_EXPIRATION_MS || 86_400_000),
   aiServiceUrl: process.env.AI_SERVICE_URL || "http://127.0.0.1:8001",
+  /** Max projects a Manager may create (lifetime, by created_by). SuperAdmin unlimited. */
+  maxProjectsPerManager: Number(process.env.MAX_PROJECTS_PER_MANAGER || 10),
   /** Comma-separated allowlist. Empty = reflect request Origin (dev). */
   corsOrigins: (process.env.CORS_ORIGINS || "")
     .split(",")

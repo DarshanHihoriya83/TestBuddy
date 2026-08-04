@@ -1,4 +1,4 @@
-export type UserRole = "SUPERADMIN" | "ADMIN" | "TESTER" | "DEVELOPER" | "MANAGER";
+export type UserRole = "SUPERADMIN" | "TESTER" | "DEVELOPER" | "MANAGER";
 export type BugPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type BugSeverity = "MINOR" | "MAJOR" | "CRITICAL" | "BLOCKER";
 export type BugStatus =

@@ -6,6 +6,7 @@ import type {
   Module,
   Organization,
   Project,
+  ProjectCreationQuota,
   Step,
   User,
 } from "./types";
@@ -175,6 +176,8 @@ export const fetchProjects = (organizationId?: string) =>
       ? `/api/projects?organizationId=${encodeURIComponent(organizationId)}`
       : "/api/projects",
   );
+
+export const fetchProjectQuota = () => api<ProjectCreationQuota>("/api/projects/quota");
 
 export interface ProjectDetail extends Project {
   cycleCount: number;

@@ -14,6 +14,7 @@ export const queryKeys = {
     organizationId
       ? (["projects", { organizationId }] as const)
       : (["projects"] as const),
+  projectQuota: ["project-quota"] as const,
   project: (id: string) => ["project", id] as const,
   projectMembers: (id: string) => ["project-members", id] as const,
   modules: (projectId: string) => ["modules", projectId] as const,

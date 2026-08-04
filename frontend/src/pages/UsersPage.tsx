@@ -261,7 +261,7 @@ export function UsersPage() {
         description={
           canFullUserAdmin
             ? "Create users, change roles, and manage account status."
-            : "Transfer roles between Developer and Tester accounts."
+            : "Browse users in your organizations."
         }
         actions={
           canFullUserAdmin ? (

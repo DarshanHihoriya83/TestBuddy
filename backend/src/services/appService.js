@@ -9,6 +9,7 @@ import {
   unauthorized,
 } from "../errors.js";
 import { generateToken } from "./jwt.js";
+import { config } from "../config.js";
 import {
   canAssignRole,
   canCommentOnBug,
@@ -21,6 +22,7 @@ import {
   canManageOrgMembers,
   canManageRole,
   canUpdateBugStatus,
+  isManager,
   isSuperAdmin,
   normalizeRole,
 } from "../roles.js";
@@ -36,6 +38,21 @@ const MIN_PASSWORD_LEN = 8;
 function blankToNull(value) {
   if (value == null || String(value).trim() === "") return null;
   return String(value).trim();
+}
+
+/** Letters + spaces only, 2–100 chars. Returns normalized name. */
+function assertAlphabeticalName(raw, label) {
+  if (raw == null || String(raw).trim().length < 2) {
+    throw badRequest(`${label} must be at least 2 characters`);
+  }
+  const name = String(raw).trim().replace(/\s+/g, " ");
+  if (name.length > 100) {
+    throw badRequest(`${label} must be at most 100 characters`);
+  }
+  if (!/^[A-Za-z]+(?: [A-Za-z]+)*$/.test(name)) {
+    throw badRequest(`${label} accepts only alphabetical characters (letters and spaces)`);
+  }
+  return name;
 }
 
 function assertPassword(password) {
@@ -63,6 +80,7 @@ function toProjectDto(project) {
     jiraProjectKey: project.jira_project_key ?? project.jiraProjectKey ?? null,
     adoOrgUrl: project.ado_org_url ?? project.adoOrgUrl ?? null,
     adoProject: project.ado_project ?? project.adoProject ?? null,
+    createdBy: project.created_by ?? project.createdBy ?? null,
   };
 }
 
@@ -201,19 +219,43 @@ async function assertCanViewOrg(actor, organizationId) {
   }
 }
 
-/** SuperAdmin, org member, or explicit project member may use the project. */
+/** Manager: all projects in orgs they belong to. Developer/Tester: project_members only. */
+async function canAccessProject(actor, project) {
+  if (isSuperAdmin(actor)) return true;
+  if (canCreateProject(actor)) {
+    return isOrgMember(project.organization_id, actor.id);
+  }
+  return isProjectMember(project.id, actor.id);
+}
+
+const PROJECT_VISIBILITY_WHERE = `
+  (
+    EXISTS (
+      SELECT 1 FROM users u
+      WHERE u.id = $1 AND u.role = 'MANAGER'
+    )
+    AND EXISTS (
+      SELECT 1 FROM organization_members om
+      WHERE om.organization_id = p.organization_id AND om.user_id = $1
+    )
+  )
+  OR EXISTS (
+    SELECT 1 FROM project_members pm
+    WHERE pm.project_id = p.id AND pm.user_id = $1
+  )`;
+
 async function assertCanAccessProject(actor, projectId) {
   if (isSuperAdmin(actor)) return;
   const project = await requireProject(projectId);
-  if (await isOrgMember(project.organization_id, actor.id)) return;
-  if (await isProjectMember(projectId, actor.id)) return;
-  throw forbidden("You do not have access to this project");
+  if (!(await canAccessProject(actor, project))) {
+    throw forbidden("You do not have access to this project");
+  }
 }
 
-/** Admin/Manager/SuperAdmin + org membership required to edit/delete a project. */
+/** Manager/SuperAdmin + org membership required to edit/delete a project. */
 async function assertCanManageProject(actor, projectId) {
   if (!canCreateProject(actor)) {
-    throw forbidden("Only Admin or Manager can manage projects");
+    throw forbidden("Only Manager or SuperAdmin can manage projects");
   }
   if (isSuperAdmin(actor)) return;
   const project = await requireProject(projectId);
@@ -229,11 +271,7 @@ async function listAccessibleProjectIds(actor) {
   }
   const { rows } = await query(
     `SELECT DISTINCT p.id FROM projects p
-     LEFT JOIN organization_members om
-       ON om.organization_id = p.organization_id AND om.user_id = $1
-     LEFT JOIN project_members pm
-       ON pm.project_id = p.id AND pm.user_id = $1
-     WHERE om.user_id IS NOT NULL OR pm.user_id IS NOT NULL`,
+     WHERE ${PROJECT_VISIBILITY_WHERE}`,
     [actor.id],
   );
   return rows.map((r) => r.id);
@@ -430,9 +468,9 @@ export async function updateProfile(current, { name, currentPassword, newPasswor
 const USER_ROLE_ORDER = `
   CASE role
     WHEN 'SUPERADMIN' THEN 0
-    WHEN 'ADMIN' THEN 1
-    WHEN 'MANAGER' THEN 2
-    WHEN 'DEVELOPER' THEN 3
+    WHEN 'MANAGER' THEN 1
+    WHEN 'DEVELOPER' THEN 2
+    WHEN 'TESTER' THEN 3
     ELSE 4
   END`;
 
@@ -447,9 +485,9 @@ export async function listUsers(actor, { projectId, directory = false } = {}) {
        ORDER BY
          CASE u.role
            WHEN 'SUPERADMIN' THEN 0
-           WHEN 'ADMIN' THEN 1
-           WHEN 'MANAGER' THEN 2
-           WHEN 'DEVELOPER' THEN 3
+           WHEN 'MANAGER' THEN 1
+           WHEN 'DEVELOPER' THEN 2
+           WHEN 'TESTER' THEN 3
            ELSE 4
          END,
          u.name`,
@@ -458,7 +496,7 @@ export async function listUsers(actor, { projectId, directory = false } = {}) {
     return rows.map(toUserDto);
   }
 
-  // Full directory only for role-transfer callers (SuperAdmin/Admin/Manager)
+  // Full directory only for role-transfer callers (SuperAdmin/Manager)
   if (directory || isSuperAdmin(actor)) {
     const { rows } = await query(
       `SELECT id, name, email, role, active FROM users ORDER BY ${USER_ROLE_ORDER}, name`,
@@ -486,9 +524,9 @@ export async function listUsers(actor, { projectId, directory = false } = {}) {
      ORDER BY
        CASE u.role
          WHEN 'SUPERADMIN' THEN 0
-         WHEN 'ADMIN' THEN 1
-         WHEN 'MANAGER' THEN 2
-         WHEN 'DEVELOPER' THEN 3
+         WHEN 'MANAGER' THEN 1
+         WHEN 'DEVELOPER' THEN 2
+         WHEN 'TESTER' THEN 3
          ELSE 4
        END,
        u.name`,
@@ -519,12 +557,16 @@ export async function addProjectMember(actor, projectId, userId, { requireManage
   } else {
     await assertCanAccessProject(actor, projectId);
   }
+  const project = await requireProject(projectId);
   const user = await query(
     `SELECT id, name, email, role, active FROM users WHERE id = $1`,
     [userId],
   );
   if (!user.rows[0]) throw notFound("User not found");
   if (user.rows[0].active === false) throw badRequest("Cannot add an inactive user");
+  if (!(await isOrgMember(project.organization_id, userId))) {
+    throw badRequest("User must belong to the organization before being added to a project");
+  }
 
   await query(
     `INSERT INTO project_members (project_id, user_id, created_at)
@@ -536,7 +578,7 @@ export async function addProjectMember(actor, projectId, userId, { requireManage
 }
 
 export async function removeProjectMember(actor, projectId, userId) {
-  await assertCanAccessProject(actor, projectId);
+  await assertCanManageProject(actor, projectId);
   const result = await query(
     `DELETE FROM project_members WHERE project_id = $1 AND user_id = $2`,
     [projectId, userId],
@@ -679,7 +721,7 @@ export async function adminUpdateUser(actor, id, { name, email, role, active, ne
   return toUserDto(rows[0]);
 }
 
-/** Privileged password reset — SuperAdmin / Admin / Manager per canManageRole. */
+/** Privileged password reset — SuperAdmin / Manager per canManageRole. */
 export async function adminResetPassword(actor, id, newPassword) {
   if (actor.id === id) {
     throw badRequest("Use profile settings to change your own password");
@@ -699,7 +741,7 @@ export async function adminResetPassword(actor, id, newPassword) {
   return toUserDto(target);
 }
 
-/** Soft-delete (deactivate). Admins may deactivate users they manage. */
+/** Soft-delete (deactivate). Managers may deactivate users they manage. */
 export async function adminDeleteUser(actor, id) {
   if (actor.id === id) throw badRequest("You cannot delete your own account");
   const { rows } = await query(`SELECT id, role, active FROM users WHERE id = $1`, [id]);
@@ -786,9 +828,13 @@ export async function getOrganization(actor, id) {
     [id],
   );
   const detail = await enrichOrganization(org);
+  const visible = [];
+  for (const p of projects) {
+    if (await canAccessProject(actor, p)) visible.push(toProjectDto(p));
+  }
   return {
     ...detail,
-    projects: projects.map(toProjectDto),
+    projects: visible,
   };
 }
 
@@ -796,13 +842,11 @@ export async function createOrganization(actor, { name }) {
   if (!canCreateOrganization(actor)) {
     throw forbidden("Only SuperAdmin can create organizations");
   }
-  if (!name || String(name).trim().length < 2) {
-    throw badRequest("Organization name must be at least 2 characters");
-  }
+  const orgName = assertAlphabeticalName(name, "Organization name");
   const id = randomUUID();
   const { rows } = await query(
     `INSERT INTO organizations (id, name, created_at) VALUES ($1, $2, NOW()) RETURNING *`,
-    [id, String(name).trim()],
+    [id, orgName],
   );
   // SuperAdmin auto-joins
   await query(
@@ -818,12 +862,10 @@ export async function updateOrganization(actor, id, { name }) {
     throw forbidden("Only SuperAdmin can update organizations");
   }
   await requireOrganization(id);
-  if (!name || String(name).trim().length < 2) {
-    throw badRequest("Organization name must be at least 2 characters");
-  }
+  const orgName = assertAlphabeticalName(name, "Organization name");
   const { rows } = await query(
     `UPDATE organizations SET name = $1 WHERE id = $2 RETURNING *`,
-    [String(name).trim(), id],
+    [orgName, id],
   );
   return enrichOrganization(rows[0]);
 }
@@ -859,7 +901,7 @@ export async function listOrganizationMembers(actor, organizationId) {
 
 export async function addOrganizationMember(actor, organizationId, userId) {
   if (!canManageOrgMembers(actor)) {
-    throw forbidden("Only SuperAdmin or Admin can add organization members");
+    throw forbidden("Only SuperAdmin or Manager can add organization members");
   }
   await requireOrganization(organizationId);
   if (!isSuperAdmin(actor)) {
@@ -883,7 +925,7 @@ export async function addOrganizationMember(actor, organizationId, userId) {
 
 export async function removeOrganizationMember(actor, organizationId, userId) {
   if (!canManageOrgMembers(actor)) {
-    throw forbidden("Only SuperAdmin or Admin can remove organization members");
+    throw forbidden("Only SuperAdmin or Manager can remove organization members");
   }
   await requireOrganization(organizationId);
   if (!isSuperAdmin(actor)) {
@@ -893,6 +935,14 @@ export async function removeOrganizationMember(actor, organizationId, userId) {
   }
   await query(
     `DELETE FROM organization_members WHERE organization_id = $1 AND user_id = $2`,
+    [organizationId, userId],
+  );
+  await query(
+    `DELETE FROM project_members pm
+     USING projects p
+     WHERE pm.project_id = p.id
+       AND p.organization_id = $1
+       AND pm.user_id = $2`,
     [organizationId, userId],
   );
 }
@@ -911,9 +961,7 @@ export async function listProjects(actor, { organizationId } = {}) {
     params.push(actor.id);
     sql = `
       SELECT DISTINCT p.* FROM projects p
-      LEFT JOIN organization_members om ON om.organization_id = p.organization_id AND om.user_id = $1
-      LEFT JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = $1
-      WHERE om.user_id IS NOT NULL OR pm.user_id IS NOT NULL`;
+      WHERE ${PROJECT_VISIBILITY_WHERE}`;
     if (organizationId) {
       params.push(organizationId);
       sql += ` AND p.organization_id = $${params.length}`;
@@ -948,30 +996,44 @@ export async function getProject(actor, id) {
 
 export async function createProject(actor, { name, organizationId, description, jiraProjectKey, adoOrgUrl, adoProject }) {
   if (!canCreateProject(actor)) {
-    throw forbidden("Only Admin or Manager can create projects");
+    throw forbidden("Only Manager or SuperAdmin can create projects");
   }
   if (!organizationId) throw badRequest("organizationId is required");
   await requireOrganization(organizationId);
   if (!isSuperAdmin(actor) && !(await isOrgMember(organizationId, actor.id))) {
     throw forbidden("You must be a member of the organization to create a project");
   }
-  if (!name || String(name).trim().length < 2) {
-    throw badRequest("Project name must be at least 2 characters");
+
+  if (isManager(actor)) {
+    const limit = Math.max(1, Number(config.maxProjectsPerManager) || 10);
+    const { rows: countRows } = await query(
+      `SELECT COUNT(*)::int AS c FROM projects WHERE created_by = $1`,
+      [actor.id],
+    );
+    const used = countRows[0]?.c ?? 0;
+    if (used >= limit) {
+      throw badRequest(
+        `Project limit reached: Managers can create at most ${limit} projects (you have ${used}).`,
+      );
+    }
   }
+
+  const projectName = assertAlphabeticalName(name, "Project name");
   return withTransaction(async (client) => {
     const id = randomUUID();
     const { rows } = await client.query(
-      `INSERT INTO projects (id, name, description, jira_project_key, ado_org_url, ado_project, organization_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO projects (id, name, description, jira_project_key, ado_org_url, ado_project, organization_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
         id,
-        name.trim(),
+        projectName,
         blankToNull(description),
         blankToNull(jiraProjectKey),
         blankToNull(adoOrgUrl),
         blankToNull(adoProject),
         organizationId,
+        actor.id,
       ],
     );
     await client.query(
@@ -988,18 +1050,38 @@ export async function createProject(actor, { name, organizationId, description, 
   });
 }
 
+/** Manager quota for project creation. SuperAdmin: unlimited. Others: not allowed. */
+export async function getProjectCreationQuota(actor) {
+  if (isSuperAdmin(actor)) {
+    return { role: "SUPERADMIN", limit: null, used: 0, remaining: null };
+  }
+  if (!isManager(actor)) {
+    return { role: actor.role, limit: 0, used: 0, remaining: 0 };
+  }
+  const limit = Math.max(1, Number(config.maxProjectsPerManager) || 10);
+  const { rows } = await query(
+    `SELECT COUNT(*)::int AS c FROM projects WHERE created_by = $1`,
+    [actor.id],
+  );
+  const used = rows[0]?.c ?? 0;
+  return {
+    role: "MANAGER",
+    limit,
+    used,
+    remaining: Math.max(0, limit - used),
+  };
+}
+
 export async function updateProject(actor, id, { name, description, jiraProjectKey, adoOrgUrl, adoProject }) {
   await assertCanManageProject(actor, id);
-  if (!name || String(name).trim().length < 2) {
-    throw badRequest("Project name must be at least 2 characters");
-  }
+  const projectName = assertAlphabeticalName(name, "Project name");
   const { rows } = await query(
     `UPDATE projects
      SET name = $1, description = $2, jira_project_key = $3, ado_org_url = $4, ado_project = $5
      WHERE id = $6
      RETURNING *`,
     [
-      name.trim(),
+      projectName,
       blankToNull(description),
       blankToNull(jiraProjectKey),
       blankToNull(adoOrgUrl),

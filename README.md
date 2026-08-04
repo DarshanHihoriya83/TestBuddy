@@ -20,26 +20,26 @@ Local run steps: [`Setup.txt`](./Setup.txt).
 - Organizations → projects → modules → bugs
 - Extension Bug mode end-to-end (Tester-only sign-in)
 - Recording toolbar, screenshots, AI polish / step humanize
-- Dashboard RBAC: SuperAdmin, Admin, Manager, Developer, Tester
-- Role transfer (SuperAdmin / Admin / Manager)
+- Dashboard RBAC: SuperAdmin, Manager, Developer, Tester
+- Role transfer (SuperAdmin / Manager)
 - Bug comments + status updates for Developer & Tester
 - PDF / Excel bug export; JSON import/export APIs
 
 ## Roles (summary)
 
-| Action | SuperAdmin | Admin | Manager | Tester | Developer |
-|---|---|---|---|---|---|
-| Create organization | yes | — | — | — | — |
-| Create project | yes | yes | yes | — | — |
-| Modules CRUD | yes | yes | yes | yes | — |
-| Create bug | yes | yes | yes | yes | — |
-| Full bug edit/delete | yes | yes | yes | — | — |
-| Bug status / comments | yes | yes | yes | yes | yes |
-| Role transfer | yes | yes* | yes† | — | — |
-| Extension login | — | — | — | **yes** | — |
+| Action | SuperAdmin | Manager | Tester | Developer |
+|---|---|---|---|---|
+| Create organization | yes | — | — | — |
+| Org members | yes | yes | — | — |
+| Create project | yes | yes | — | — |
+| Modules CRUD | yes | yes | yes | — |
+| Create bug | yes | yes | yes | — |
+| Full bug edit/delete | yes | yes | edit only | — |
+| Bug status / comments | yes | yes | yes | yes |
+| User CRUD / role assign | yes | yes* | — | — |
+| Extension login | — | — | **yes** | — |
 
-\* Admin assigns Manager / Developer / Tester  
-† Manager assigns Developer ↔ Tester only  
+\* Manager assigns Manager / Developer / Tester  
 
 ## Quick start
 
@@ -61,7 +61,6 @@ npm run dev
 Seeded users (password: `password`):
 
 - `superadmin@testbuddy.local` — SUPERADMIN  
-- `admin@testbuddy.local` — ADMIN  
 - `carol@testbuddy.local` — MANAGER  
 - `bob@testbuddy.local` — DEVELOPER  
 - `alice@testbuddy.local` — TESTER  
