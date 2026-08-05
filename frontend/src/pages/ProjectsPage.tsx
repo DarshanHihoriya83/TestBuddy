@@ -666,20 +666,17 @@ export function ProjectsPage() {
                 <h2 id="create-project-title" className="text-lg font-semibold text-[var(--ink)]">
                   Create project
                 </h2>
-                <div className="mt-1 space-y-0.5 text-xs font-medium">
-                  {selectedOrg && typeof orgCap === "number" && (
-                    <p className={orgAtLimit ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
-                      Org quota: {orgUsed}/{orgCap} projects
-                      {orgAtLimit ? " · full" : ` · ${Math.max(0, orgCap - orgUsed)} left`}
-                    </p>
-                  )}
-                  {isManager(user) && quota?.limit != null && (
-                    <p className={personalAtLimit ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
-                      Your quota: {quota.used}/{quota.limit} projects
-                      {typeof quota.remaining === "number" ? ` · ${quota.remaining} left` : ""}
-                    </p>
-                  )}
-                </div>              </div>
+                {!isManager(user) && (
+                  <div className="mt-1 space-y-0.5 text-xs font-medium">
+                    {selectedOrg && typeof orgCap === "number" && (
+                      <p className={orgAtLimit ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
+                        Org quota: {orgUsed}/{orgCap} projects
+                        {orgAtLimit ? " · full" : ` · ${Math.max(0, orgCap - orgUsed)} left`}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
                 className="tb-btn-icon h-9 w-9"

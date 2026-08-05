@@ -80,7 +80,7 @@ export function canManageProjectMembers(user) {
 
 export function canManageModules(user) {
   const r = normalizeRole(user?.role);
-  return r === "SUPERADMIN" || r === "MANAGER" || r === "TESTER";
+  return r === "MANAGER" || r === "TESTER";
 }
 
 export function canCreateBug(user) {

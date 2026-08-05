@@ -88,10 +88,10 @@ Managers (and SuperAdmin) create other roles from Users page.
 
 Roles cheat-sheet
 -----------------
-- SuperAdmin : organizations, all users, hard-delete users
-- Manager : create projects under an org (capped by org maxProjects from SuperAdmin, and MAX_PROJECTS_PER_MANAGER); sees all org projects; full bug edit; user CRUD; org members; assign Manager/Dev/Tester; grant project access
+- SuperAdmin : organizations, all users, hard-delete users; modules view-only (no add/edit/delete)
+- Manager : create projects under an org (capped by org maxProjects from SuperAdmin, and MAX_PROJECTS_PER_MANAGER); sees all org projects; modules; full bug edit; user CRUD; org members; assign Manager/Dev/Tester; grant project access
 - Tester : org member; sees only Manager-assigned projects; modules, create bugs (extension), comments, bug status
-- Developer : org member; sees only Manager-assigned projects; comments + bug status only (no bug create / no project create)
+- Developer : org member; sees only Manager-assigned projects; comments + bug status only (no bug create / no project create / no modules manage)
 
 Project access: org membership alone is not enough for Tester/Developer — Manager must add them to each project.
 Project create: Manager only (SuperAdmin also allowed); Developer/Tester cannot create. Managers are capped by the organization's project limit (SuperAdmin sets maxProjects) and by MAX_PROJECTS_PER_MANAGER (default 10).

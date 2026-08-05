@@ -723,6 +723,15 @@ async function testOrgRbac() {
   if (badMod.res.status === 403) pass("Developer forbidden create module");
   else fail("Developer forbidden create module", `status ${badMod.res.status}`);
 
+  // SuperAdmin cannot create module (Manager | Tester only)
+  await loginAs("superadmin@testbuddy.local");
+  const saMod = await api(`/api/projects/${targetProject}/modules`, {
+    method: "POST",
+    body: JSON.stringify({ name: "SaMod" }),
+  });
+  if (saMod.res.status === 403) pass("SuperAdmin forbidden create module");
+  else fail("SuperAdmin forbidden create module", `status ${saMod.res.status}`);
+
   // Manager assigns Tester → Tester sees project (+ modules)
   if (mgrProjId) {
     await loginAs("carol@testbuddy.local");

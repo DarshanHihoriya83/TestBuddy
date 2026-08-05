@@ -32,7 +32,7 @@ export function canManageProjectMembers(user: User | null | undefined) {
 
 export function canManageModules(user: User | null | undefined) {
   const r = user?.role;
-  return r === "SUPERADMIN" || r === "MANAGER" || r === "TESTER";
+  return r === "MANAGER" || r === "TESTER";
 }
 
 export function canCreateBug(user: User | null | undefined) {

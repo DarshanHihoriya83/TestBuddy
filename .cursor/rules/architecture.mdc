@@ -65,7 +65,8 @@ Mirror these in the Node backend (DB rows / mappers) and as TypeScript interface
 - **Projects:** SuperAdmin | Manager create (must belong to org); Manager capped by org `maxProjects` (SuperAdmin sets per org) and by `MAX_PROJECTS_PER_MANAGER` (default 10, lifetime by created_by)
 - **Project visibility:** Manager sees all projects in their org(s); Developer/Tester only projects where added to `project_members` (Manager must grant access)
 - **Project members:** SuperAdmin | Manager add/remove; target user must be an org member first
-- **Modules / create bug:** includes Tester (on accessible projects only)
+- **Modules (create/edit/delete):** Manager | Tester only (accessible projects); SuperAdmin view-only
+- **Create bug:** includes Tester (on accessible projects only)
 - **Bug status + comments:** Developer and Tester (plus Manager/SuperAdmin)
 - **User CRUD / role assign:** SuperAdmin | Manager (Manager: Manager/Developer/Tester)
 - **User hard-delete:** SuperAdmin, only after deactivate
