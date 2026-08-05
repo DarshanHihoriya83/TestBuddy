@@ -81,6 +81,7 @@ function toProjectDto(project) {
     adoOrgUrl: project.ado_org_url ?? project.adoOrgUrl ?? null,
     adoProject: project.ado_project ?? project.adoProject ?? null,
     createdBy: project.created_by ?? project.createdBy ?? null,
+    createdAt: project.created_at ?? project.createdAt ?? null,
   };
 }
 
@@ -1074,8 +1075,8 @@ export async function createProject(actor, { name, organizationId, description, 
   return withTransaction(async (client) => {
     const id = randomUUID();
     const { rows } = await client.query(
-      `INSERT INTO projects (id, name, description, jira_project_key, ado_org_url, ado_project, organization_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO projects (id, name, description, jira_project_key, ado_org_url, ado_project, organization_id, created_by, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
        RETURNING *`,
       [
         id,
@@ -1264,6 +1265,7 @@ export async function deleteProject(actor, id) {
       [id],
     );
     await client.query(`DELETE FROM bugs WHERE project_id = $1`, [id]);
+    await client.query(`DELETE FROM test_cases WHERE project_id = $1`, [id]);
     await client.query(`DELETE FROM cycles WHERE project_id = $1`, [id]);
     await client.query(`DELETE FROM projects WHERE id = $1`, [id]);
   });
@@ -1513,4 +1515,232 @@ export async function readScreenshotBytes(actor, id) {
   const row = await getScreenshot(actor, id);
   const buffer = await readScreenshotFile(row.storage_path);
   return { row, buffer };
+}
+
+const TC_TYPES = new Set(["POSITIVE", "NEGATIVE"]);
+const TC_PRIORITIES = new Set(["LOW", "MEDIUM", "HIGH"]);
+const TC_STATUSES = new Set(["AI_DRAFT", "VERIFIED", "REJECTED", "UPLOADED"]);
+const TC_EXEC = new Set(["PASSED", "FAILED", "BLOCKED", "NOT_EXECUTED"]);
+
+function toTestCaseDto(row) {
+  let steps = row.steps;
+  if (typeof steps === "string") {
+    try {
+      steps = JSON.parse(steps);
+    } catch {
+      steps = [];
+    }
+  }
+  if (!Array.isArray(steps)) steps = [];
+  return {
+    id: row.id,
+    title: row.title,
+    flowDescription: row.flow_description ?? "",
+    type: row.type,
+    preconditions: row.preconditions ?? null,
+    steps,
+    priority: row.priority,
+    status: row.status,
+    executionStatus: row.execution_status ?? "NOT_EXECUTED",
+    generatedByAi: !!row.generated_by_ai,
+    projectId: row.project_id,
+    moduleId: row.module_id ?? null,
+    cycleId: row.cycle_id,
+    assigneeId: row.assignee_id ?? null,
+    linkedBugId: row.linked_bug_id ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function buildTestCaseFilters({
+  projectId,
+  projectIds,
+  moduleId,
+  status,
+  type,
+  priority,
+  assigneeId,
+  executionStatus,
+}) {
+  const clauses = [];
+  const params = [];
+  const add = (sql, value) => {
+    params.push(value);
+    clauses.push(`${sql} $${params.length}`);
+  };
+  if (projectId) add("project_id =", projectId);
+  else if (projectIds) {
+    if (projectIds.length === 0) clauses.push("FALSE");
+    else {
+      params.push(projectIds);
+      clauses.push(`project_id = ANY($${params.length}::uuid[])`);
+    }
+  }
+  if (moduleId) add("module_id =", moduleId);
+  if (status) add("status =", status);
+  if (type) add("type =", type);
+  if (priority) add("priority =", priority);
+  if (assigneeId) add("assignee_id =", assigneeId);
+  if (executionStatus) add("execution_status =", executionStatus);
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return { where, params };
+}
+
+export async function listTestCases(actor, filters = {}) {
+  const scoped = { ...filters };
+  if (scoped.projectId) {
+    await assertCanAccessProject(actor, scoped.projectId);
+  } else if (!isSuperAdmin(actor)) {
+    scoped.projectIds = await listAccessibleProjectIds(actor);
+  }
+  const { where, params } = buildTestCaseFilters(scoped);
+  const { rows } = await query(
+    `SELECT * FROM test_cases ${where} ORDER BY updated_at DESC`,
+    params,
+  );
+  return rows.map(toTestCaseDto);
+}
+
+export async function getTestCase(actor, id) {
+  const { rows } = await query(`SELECT * FROM test_cases WHERE id = $1`, [id]);
+  if (!rows[0]) throw notFound("Test case not found");
+  await assertCanAccessProject(actor, rows[0].project_id);
+  return toTestCaseDto(rows[0]);
+}
+
+export async function createTestCase(actor, body) {
+  if (!actor || !canCreateBug(actor)) {
+    throw forbidden("You cannot create test cases");
+  }
+  const {
+    title,
+    flowDescription = "",
+    type,
+    preconditions,
+    steps = [],
+    priority,
+    status = "AI_DRAFT",
+    executionStatus = "NOT_EXECUTED",
+    projectId,
+    moduleId,
+    cycleId,
+    assigneeId,
+    linkedBugId,
+    generatedByAi = false,
+  } = body || {};
+
+  if (!title?.trim()) throw badRequest("title is required");
+  if (!TC_TYPES.has(type)) throw badRequest("type must be POSITIVE or NEGATIVE");
+  if (!TC_PRIORITIES.has(priority)) throw badRequest("priority must be LOW, MEDIUM, or HIGH");
+  if (!TC_STATUSES.has(status)) throw badRequest("invalid status");
+  if (!TC_EXEC.has(executionStatus)) throw badRequest("invalid executionStatus");
+  if (!projectId) throw badRequest("projectId is required");
+  if (!cycleId) throw badRequest("cycleId is required");
+
+  await assertCanAccessProject(actor, projectId);
+
+  if (moduleId) {
+    const { rows: mods } = await query(`SELECT project_id FROM modules WHERE id = $1`, [moduleId]);
+    if (!mods[0] || mods[0].project_id !== projectId) {
+      throw badRequest("moduleId does not belong to project");
+    }
+  }
+
+  const id = randomUUID();
+  const { rows } = await query(
+    `INSERT INTO test_cases (
+       id, title, flow_description, type, preconditions, steps, priority, status,
+       execution_status, generated_by_ai, project_id, module_id, cycle_id, assignee_id,
+       linked_bug_id, created_at, updated_at
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW()
+     ) RETURNING *`,
+    [
+      id,
+      title.trim(),
+      String(flowDescription ?? ""),
+      type,
+      blankToNull(preconditions),
+      JSON.stringify(Array.isArray(steps) ? steps : []),
+      priority,
+      status,
+      executionStatus,
+      !!generatedByAi,
+      projectId,
+      moduleId || null,
+      cycleId,
+      assigneeId || null,
+      linkedBugId || null,
+    ],
+  );
+  return toTestCaseDto(rows[0]);
+}
+
+export async function updateTestCase(actor, id, body) {
+  if (!actor || !canCreateBug(actor)) {
+    throw forbidden("You cannot update test cases");
+  }
+  const existing = await getTestCase(actor, id);
+  const {
+    title = existing.title,
+    flowDescription = existing.flowDescription,
+    type = existing.type,
+    preconditions = existing.preconditions,
+    steps = existing.steps,
+    priority = existing.priority,
+    status = existing.status,
+    executionStatus = existing.executionStatus,
+    moduleId = existing.moduleId,
+    cycleId = existing.cycleId,
+    assigneeId = existing.assigneeId,
+    linkedBugId = existing.linkedBugId,
+  } = body || {};
+
+  if (!String(title).trim()) throw badRequest("title is required");
+  if (!TC_TYPES.has(type)) throw badRequest("type must be POSITIVE or NEGATIVE");
+  if (!TC_PRIORITIES.has(priority)) throw badRequest("priority must be LOW, MEDIUM, or HIGH");
+  if (!TC_STATUSES.has(status)) throw badRequest("invalid status");
+  if (!TC_EXEC.has(executionStatus)) throw badRequest("invalid executionStatus");
+  if (!cycleId) throw badRequest("cycleId is required");
+
+  if (moduleId) {
+    const { rows: mods } = await query(`SELECT project_id FROM modules WHERE id = $1`, [moduleId]);
+    if (!mods[0] || mods[0].project_id !== existing.projectId) {
+      throw badRequest("moduleId does not belong to project");
+    }
+  }
+
+  const { rows } = await query(
+    `UPDATE test_cases SET
+       title = $1, flow_description = $2, type = $3, preconditions = $4, steps = $5::jsonb,
+       priority = $6, status = $7, execution_status = $8, module_id = $9, cycle_id = $10,
+       assignee_id = $11, linked_bug_id = $12, updated_at = NOW()
+     WHERE id = $13
+     RETURNING *`,
+    [
+      String(title).trim(),
+      String(flowDescription ?? ""),
+      type,
+      blankToNull(preconditions),
+      JSON.stringify(Array.isArray(steps) ? steps : []),
+      priority,
+      status,
+      executionStatus,
+      moduleId || null,
+      cycleId,
+      assigneeId || null,
+      linkedBugId || null,
+      id,
+    ],
+  );
+  return toTestCaseDto(rows[0]);
+}
+
+export async function deleteTestCase(actor, id) {
+  if (!actor || !canDeleteBug(actor)) {
+    throw forbidden("You cannot delete test cases");
+  }
+  await getTestCase(actor, id);
+  await query(`DELETE FROM test_cases WHERE id = $1`, [id]);
 }

@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
-import { AppSidebar, PageBreadcrumb } from "./AppNavigation";
+import { AppSidebar, PageBreadcrumb, type BreadcrumbItem } from "./AppNavigation";
 
 export function Shell({
   title,
+  crumbs,
   actions,
   children,
 }: {
   title: string;
+  crumbs?: BreadcrumbItem[];
   actions?: ReactNode;
   children: ReactNode;
 }) {
@@ -15,7 +17,7 @@ export function Shell({
       <AppSidebar />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <main className="flex min-h-0 w-full flex-1 flex-col overflow-hidden px-5 py-3">
-          <PageBreadcrumb title={title} />
+          <PageBreadcrumb title={title} crumbs={crumbs} />
           {actions ? (
             <div className="mb-3 flex shrink-0 flex-wrap items-center justify-end gap-2">{actions}</div>
           ) : null}

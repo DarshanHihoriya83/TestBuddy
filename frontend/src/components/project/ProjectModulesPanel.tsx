@@ -34,6 +34,42 @@ function GridIcon() {
   );
 }
 
+function MenuViewIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="2.75" stroke="currentColor" strokeWidth="1.75" />
+    </svg>
+  );
+}
+
+function MenuEditIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+      />
+      <path d="m13.5 6.5 3 3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MenuDeleteIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function ModuleIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -201,8 +237,8 @@ function KebabMenu({
       return;
     }
     const rect = btnRef.current.getBoundingClientRect();
-    const menuW = 144;
-    const menuH = canManage ? 132 : 44;
+    const menuW = 160;
+    const menuH = canManage ? 144 : 44;
     const gap = 4;
     const openUp = rect.bottom + gap + menuH > window.innerHeight - 8;
     const left = Math.min(Math.max(8, rect.right - menuW), window.innerWidth - menuW - 8);
@@ -239,14 +275,15 @@ function KebabMenu({
             ref={menuRef}
             role="menu"
             style={{ top: pos.top, left: pos.left }}
-            className="fixed z-[80] w-36 overflow-hidden rounded-xl border border-[var(--line)] bg-white py-1 text-center shadow-lg"
+            className="fixed z-[80] w-40 overflow-hidden rounded-xl border border-[var(--line)] bg-white py-1 shadow-lg"
           >
             <Link
               role="menuitem"
               to={`/projects/${projectId}/modules/${module.id}`}
-              className="tb-menu-item block px-3 py-2.5 text-sm"
+              className="tb-menu-item"
               onClick={() => setOpen(false)}
             >
+              <MenuViewIcon />
               View
             </Link>
             {canManage && (
@@ -254,24 +291,27 @@ function KebabMenu({
                 <button
                   type="button"
                   role="menuitem"
-                  className="tb-menu-item block w-full px-3 py-2.5 text-sm"
+                  className="tb-menu-item"
                   onClick={() => {
                     setOpen(false);
                     onEdit();
                   }}
                 >
+                  <MenuEditIcon />
                   Edit
                 </button>
+                <hr className="tb-menu-divider" />
                 <button
                   type="button"
                   role="menuitem"
                   disabled={deleting}
-                  className="block w-full px-3 py-2.5 text-center text-sm text-[var(--danger)] hover:bg-[var(--danger-soft)] disabled:opacity-50"
+                  className="tb-menu-item-danger"
                   onClick={() => {
                     setOpen(false);
                     onDelete();
                   }}
                 >
+                  <MenuDeleteIcon />
                   Delete
                 </button>
               </>
@@ -435,11 +475,19 @@ export function ProjectModulesPanel({
               : "Browse modules in this project."}
           </p>
         </div>
-        {canManage && (
-          <button type="button" className="tb-btn-primary shrink-0" onClick={openCreate}>
-            <span aria-hidden>+</span> Add module
-          </button>
-        )}
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Link
+            to="/projects"
+            className="tb-btn-ghost inline-flex items-center gap-1.5 text-sm shadow-sm"
+          >
+            {"\u2190"} Back to projects
+          </Link>
+          {canManage && (
+            <button type="button" className="tb-btn-primary shrink-0" onClick={openCreate}>
+              <span aria-hidden>+</span> Add module
+            </button>
+          )}
+        </div>
       </div>
 
       {error && !createOpen && !editModule && !deleteTarget ? (
@@ -665,7 +713,7 @@ export function ProjectModulesPanel({
             <form className="mt-4" onSubmit={submitCreate}>
               <div className="grid gap-3">
                 <label className="tb-label">
-                  Name *
+                  Name <span className="tb-req">*</span>
                   <input
                     className="tb-input"
                     value={moduleName}
@@ -735,7 +783,7 @@ export function ProjectModulesPanel({
             <form className="mt-4" onSubmit={submitEdit}>
               <div className="grid gap-3">
                 <label className="tb-label">
-                  Name *
+                  Name <span className="tb-req">*</span>
                   <input
                     className="tb-input"
                     value={editName}

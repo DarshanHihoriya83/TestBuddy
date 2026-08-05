@@ -14,6 +14,7 @@ import screenshotRoutes from "./routes/screenshots.js";
 import extensionRoutes from "./routes/extension.js";
 import aiRoutes from "./routes/ai.js";
 import organizationRoutes from "./routes/organizations.js";
+import testCaseRoutes from "./routes/testcases.js";
 import { ensureUploadsDir } from "./services/screenshotStorage.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -53,6 +54,7 @@ app.use("/api/organizations", organizationRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api", aiRoutes);
 app.use("/api/bugs", bugRoutes);
+app.use("/api/testcases", testCaseRoutes);
 app.use("/api/screenshots", screenshotRoutes);
 app.use("/api/extension", extensionRoutes);
 

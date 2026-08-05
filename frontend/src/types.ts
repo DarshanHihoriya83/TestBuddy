@@ -9,6 +9,16 @@ export type BugStatus =
   | "VERIFIED"
   | "CLOSED"
   | "REOPENED";
+
+export type TestCaseType = "POSITIVE" | "NEGATIVE";
+export type TestCasePriority = "LOW" | "MEDIUM" | "HIGH";
+export type TestCaseStatus = "AI_DRAFT" | "VERIFIED" | "REJECTED" | "UPLOADED";
+export type TestCaseExecutionStatus =
+  | "PASSED"
+  | "FAILED"
+  | "BLOCKED"
+  | "NOT_EXECUTED";
+
 export type StepActionType =
   | "click"
   | "input"
@@ -34,6 +44,7 @@ export interface Project {
   adoOrgUrl?: string;
   adoProject?: string;
   createdBy?: string | null;
+  createdAt?: string;
 }
 
 export interface ProjectCreationQuota {
@@ -133,4 +144,40 @@ export interface BugFilters {
   cycleId?: string;
   status?: BugStatus | "";
   moduleId?: string;
+}
+
+export interface TestCaseStep {
+  order?: number;
+  action: string;
+  expectedResult?: string;
+}
+
+export interface TestCase {
+  id: string;
+  title: string;
+  flowDescription: string;
+  type: TestCaseType;
+  preconditions?: string | null;
+  steps: TestCaseStep[];
+  priority: TestCasePriority;
+  status: TestCaseStatus;
+  executionStatus: TestCaseExecutionStatus;
+  generatedByAi: boolean;
+  projectId: string;
+  moduleId?: string | null;
+  cycleId: string;
+  assigneeId?: string | null;
+  linkedBugId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TestCaseFilters {
+  projectId?: string;
+  moduleId?: string;
+  status?: TestCaseStatus | "";
+  type?: TestCaseType | "";
+  priority?: TestCasePriority | "";
+  assigneeId?: string;
+  executionStatus?: TestCaseExecutionStatus | "";
 }

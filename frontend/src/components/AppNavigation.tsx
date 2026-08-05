@@ -415,7 +415,18 @@ export function AppSidebar() {
   );
 }
 
-export function PageBreadcrumb({ title }: { title: string }) {
+export type BreadcrumbItem = {
+  label: string;
+  to?: string;
+};
+
+export function PageBreadcrumb({
+  title,
+  crumbs = [],
+}: {
+  title: string;
+  crumbs?: BreadcrumbItem[];
+}) {
   return (
     <div className="tb-breadcrumb-bar">
       <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-sm text-[var(--muted)]">
@@ -427,8 +438,26 @@ export function PageBreadcrumb({ title }: { title: string }) {
           <HomeIcon />
           <span className="hidden sm:inline">Home</span>
         </Link>
-        <span aria-hidden className="text-[var(--line)]">
-          /
+        {crumbs.map((crumb) => (
+          <span key={`${crumb.to ?? ""}-${crumb.label}`} className="contents">
+            <span aria-hidden className="select-none text-[var(--muted)] opacity-60">
+              {"\u203A"}
+            </span>
+            {crumb.to ? (
+              <Link
+                to={crumb.to}
+                className="truncate rounded-lg px-1.5 py-0.5 transition hover:bg-[var(--bg0)] hover:text-[var(--ink)]"
+                title={crumb.label}
+              >
+                {crumb.label}
+              </Link>
+            ) : (
+              <span className="truncate">{crumb.label}</span>
+            )}
+          </span>
+        ))}
+        <span aria-hidden className="select-none text-[var(--muted)] opacity-60">
+          {"\u203A"}
         </span>
         <span className="truncate font-semibold text-[var(--accent)]">{title}</span>
       </nav>

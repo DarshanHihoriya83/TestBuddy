@@ -1,4 +1,5 @@
 import type { BugFilters } from "./types";
+import type { TestCaseFilters } from "./types";
 
 /** Central TanStack Query keys — invalidate by family prefix. */
 export const queryKeys = {
@@ -23,4 +24,7 @@ export const queryKeys = {
     filters ? (["bugs", filters] as const) : (["bugs"] as const),
   bug: (id: string) => ["bug", id] as const,
   bugComments: (id: string) => ["bug-comments", id] as const,
+  testCases: (filters?: TestCaseFilters | { projectId?: string; moduleId?: string }) =>
+    filters ? (["testcases", filters] as const) : (["testcases"] as const),
+  testCase: (id: string) => ["testcase", id] as const,
 };

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import {
   createModule,
   deleteModule,
@@ -20,7 +20,6 @@ export function ProjectDetailPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const canModules = canManageModules(user);
-  const isTester = user?.role === "TESTER";
   const [moduleName, setModuleName] = useState("");
   const [moduleDescription, setModuleDescription] = useState("");
   const [moduleError, setModuleError] = useState<string | null>(null);
@@ -84,22 +83,11 @@ export function ProjectDetailPage() {
   return (
     <Shell title={project?.name ?? "Project"}>
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3 px-4 sm:px-5">
-          <Link to="/projects" className="tb-link text-sm">
-            ← Back to projects
-          </Link>
-          {project && !isTester && (
-            <Link to={`/bugs?projectId=${project.id}`} className="tb-btn-ghost text-sm">
-              View bugs
-            </Link>
-          )}
-        </div>
-
         <QueryStatus
           isLoading={projectQuery.isLoading}
           error={projectQuery.error}
           onRetry={() => void projectQuery.refetch()}
-          loadingText="Loading…"
+          loadingText="Loading\u2026"
         />
 
         {project && !projectQuery.isLoading && !projectQuery.error && (

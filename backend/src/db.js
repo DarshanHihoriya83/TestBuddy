@@ -48,7 +48,8 @@ export async function ensureSchema() {
       description VARCHAR(4000),
       jira_project_key VARCHAR(255),
       ado_org_url VARCHAR(255),
-      ado_project VARCHAR(255)
+      ado_project VARCHAR(255),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS cycles (
@@ -138,6 +139,26 @@ export async function ensureSchema() {
       body VARCHAR(4000) NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS test_cases (
+      id UUID PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      flow_description VARCHAR(4000) NOT NULL DEFAULT '',
+      type VARCHAR(32) NOT NULL,
+      preconditions VARCHAR(4000),
+      steps JSONB NOT NULL DEFAULT '[]'::jsonb,
+      priority VARCHAR(32) NOT NULL,
+      status VARCHAR(32) NOT NULL,
+      execution_status VARCHAR(32) NOT NULL DEFAULT 'NOT_EXECUTED',
+      generated_by_ai BOOLEAN NOT NULL DEFAULT false,
+      project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      module_id UUID REFERENCES modules(id) ON DELETE SET NULL,
+      cycle_id UUID NOT NULL,
+      assignee_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      linked_bug_id UUID,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 
   await query(`
@@ -148,6 +169,40 @@ export async function ensureSchema() {
   await query(`
     ALTER TABLE projects
     ADD COLUMN IF NOT EXISTS description VARCHAR(4000)
+  `);
+
+  await query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ
+  `);
+  await query(`
+    UPDATE projects p
+    SET created_at = sub.joined_at
+    FROM (
+      SELECT project_id, MIN(created_at) AS joined_at
+      FROM project_members
+      GROUP BY project_id
+    ) sub
+    WHERE p.id = sub.project_id AND p.created_at IS NULL
+  `);
+  await query(`
+    UPDATE projects SET created_at = NOW() WHERE created_at IS NULL
+  `);
+  await query(`
+    ALTER TABLE projects
+    ALTER COLUMN created_at SET DEFAULT NOW()
+  `);
+  await query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'projects' AND column_name = 'created_at'
+          AND is_nullable = 'YES'
+      ) THEN
+        ALTER TABLE projects ALTER COLUMN created_at SET NOT NULL;
+      END IF;
+    END $$;
   `);
 
   await query(`
@@ -316,5 +371,27 @@ export async function ensureSchema() {
         pm.created_at ASC
     ) sub
     WHERE p.id = sub.project_id AND p.created_by IS NULL
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS test_cases (
+      id UUID PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      flow_description VARCHAR(4000) NOT NULL DEFAULT '',
+      type VARCHAR(32) NOT NULL,
+      preconditions VARCHAR(4000),
+      steps JSONB NOT NULL DEFAULT '[]'::jsonb,
+      priority VARCHAR(32) NOT NULL,
+      status VARCHAR(32) NOT NULL,
+      execution_status VARCHAR(32) NOT NULL DEFAULT 'NOT_EXECUTED',
+      generated_by_ai BOOLEAN NOT NULL DEFAULT false,
+      project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      module_id UUID REFERENCES modules(id) ON DELETE SET NULL,
+      cycle_id UUID NOT NULL,
+      assignee_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      linked_bug_id UUID,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
   `);
 }

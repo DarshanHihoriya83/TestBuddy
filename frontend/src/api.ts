@@ -8,6 +8,8 @@ import type {
   Project,
   ProjectCreationQuota,
   Step,
+  TestCase,
+  TestCaseFilters,
   User,
 } from "./types";
 import { forceLogout } from "./authEvents";
@@ -363,3 +365,71 @@ export function importBugs(bugs: unknown[]) {
     body: JSON.stringify({ bugs }),
   });
 }
+
+export function buildTestCaseQuery(filters: TestCaseFilters = {}) {
+  const params = new URLSearchParams();
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.moduleId) params.set("moduleId", filters.moduleId);
+  if (filters.status) params.set("status", filters.status);
+  if (filters.type) params.set("type", filters.type);
+  if (filters.priority) params.set("priority", filters.priority);
+  if (filters.assigneeId) params.set("assigneeId", filters.assigneeId);
+  if (filters.executionStatus) params.set("executionStatus", filters.executionStatus);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export function fetchTestCases(filters: TestCaseFilters = {}) {
+  return api<TestCase[]>(`/api/testcases${buildTestCaseQuery(filters)}`);
+}
+
+export const fetchTestCase = (id: string) => api<TestCase>(`/api/testcases/${id}`);
+
+export function createTestCase(body: {
+  title: string;
+  flowDescription?: string;
+  type: string;
+  preconditions?: string;
+  steps?: { order?: number; action: string; expectedResult?: string }[];
+  priority: string;
+  status?: string;
+  executionStatus?: string;
+  projectId: string;
+  moduleId?: string | null;
+  cycleId: string;
+  assigneeId?: string | null;
+  linkedBugId?: string | null;
+  generatedByAi?: boolean;
+}) {
+  return api<TestCase>("/api/testcases", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateTestCase(
+  id: string,
+  body: Partial<{
+    title: string;
+    flowDescription: string;
+    type: string;
+    preconditions: string | null;
+    steps: { order?: number; action: string; expectedResult?: string }[];
+    priority: string;
+    status: string;
+    executionStatus: string;
+    moduleId: string | null;
+    cycleId: string;
+    assigneeId: string | null;
+    linkedBugId: string | null;
+  }>,
+) {
+  return api<TestCase>(`/api/testcases/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export const deleteTestCase = (id: string) =>
+  api<void>(`/api/testcases/${id}`, { method: "DELETE" });
+

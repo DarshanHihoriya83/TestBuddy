@@ -86,6 +86,13 @@ function CalendarIcon() {
   );
 }
 
+function formatDate(value?: string) {
+  if (!value) return "\u2014";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "\u2014";
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
 function KebabMenu({
   project,
   canManage,
@@ -110,8 +117,8 @@ function KebabMenu({
       return;
     }
     const rect = btnRef.current.getBoundingClientRect();
-    const menuW = 144;
-    const menuH = canManage ? 132 : 44;
+    const menuW = 160;
+    const menuH = canManage ? 144 : 44;
     const gap = 4;
     const openUp = rect.bottom + gap + menuH > window.innerHeight - 8;
     const left = Math.min(
@@ -151,14 +158,15 @@ function KebabMenu({
             ref={menuRef}
             role="menu"
             style={{ top: pos.top, left: pos.left }}
-            className="fixed z-[80] w-36 overflow-hidden rounded-xl border border-[var(--line)] bg-white py-1 text-center shadow-lg"
+            className="fixed z-[80] w-40 overflow-hidden rounded-xl border border-[var(--line)] bg-white py-1 shadow-lg"
           >
             <Link
               role="menuitem"
               to={`/projects/${project.id}`}
-              className="tb-menu-item block px-3 py-2.5 text-sm"
+              className="tb-menu-item"
               onClick={() => setOpen(false)}
             >
+              <MenuViewIcon />
               View
             </Link>
             {canManage && (
@@ -166,24 +174,27 @@ function KebabMenu({
                 <button
                   type="button"
                   role="menuitem"
-                  className="tb-menu-item block w-full px-3 py-2.5 text-sm"
+                  className="tb-menu-item"
                   onClick={() => {
                     setOpen(false);
                     onEdit();
                   }}
                 >
+                  <MenuEditIcon />
                   Edit
                 </button>
+                <hr className="tb-menu-divider" />
                 <button
                   type="button"
                   role="menuitem"
                   disabled={deleting}
-                  className="block w-full px-3 py-2.5 text-center text-sm text-[var(--danger)] hover:bg-[var(--danger-soft)] disabled:opacity-50"
+                  className="tb-menu-item-danger"
                   onClick={() => {
                     setOpen(false);
                     onDelete();
                   }}
                 >
+                  <MenuDeleteIcon />
                   Delete
                 </button>
               </>
@@ -214,14 +225,58 @@ function KebabMenu({
   );
 }
 
-function pageNumbers(current: number, total: number): (number | "?")[] {
+function CloseIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MenuViewIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="2.75" stroke="currentColor" strokeWidth="1.75" />
+    </svg>
+  );
+}
+
+function MenuEditIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+      />
+      <path d="m13.5 6.5 3 3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MenuDeleteIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function pageNumbers(current: number, total: number): (number | "ellipsis")[] {
   if (total <= 5) return Array.from({ length: total }, (_, i) => i + 1);
-  const pages: (number | "?")[] = [1];
-  if (current > 3) pages.push("?");
+  const pages: (number | "ellipsis")[] = [1];
+  if (current > 3) pages.push("ellipsis");
   for (let p = Math.max(2, current - 1); p <= Math.min(total - 1, current + 1); p++) {
     pages.push(p);
   }
-  if (current < total - 2) pages.push("?");
+  if (current < total - 2) pages.push("ellipsis");
   pages.push(total);
   return pages;
 }
@@ -422,7 +477,7 @@ export function ProjectsPage() {
     const cycleName =
       cyclesQuery.data?.find((c) => c.isDefault)?.name ??
       cyclesQuery.data?.[0]?.name ??
-      "?";
+      "\u2014";
     return { projectCount, activeBugs, teamMembers, cycleName };
   }, [projectsQuery.data, bugsQuery.data, orgs, cyclesQuery.data]);
 
@@ -617,7 +672,7 @@ export function ProjectsPage() {
         />
         <StatCard
           label="Team Members"
-          value={stats.teamMembers || "?"}
+          value={stats.teamMembers || "\u2014"}
           accent="purple"
           icon={
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -661,25 +716,23 @@ export function ProjectsPage() {
                   {selectedOrg && typeof orgCap === "number" && (
                     <p className={orgAtLimit ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
                       Org quota: {orgUsed}/{orgCap} projects
-                      {orgAtLimit ? " · full" : ` · ${Math.max(0, orgCap - orgUsed)} left`}
+                      {orgAtLimit ? " ? full" : ` ? ${Math.max(0, orgCap - orgUsed)} left`}
                     </p>
                   )}
                   {isManager(user) && quota?.limit != null && (
                     <p className={personalAtLimit ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
                       Your quota: {quota.used}/{quota.limit} projects
-                      {typeof quota.remaining === "number" ? ` · ${quota.remaining} left` : ""}
+                      {typeof quota.remaining === "number" ? ` ? ${quota.remaining} left` : ""}
                     </p>
                   )}
-                </div>
-              </div>
+                </div>              </div>
               <button
                 type="button"
                 className="tb-btn-icon h-9 w-9"
                 aria-label="Close"
                 onClick={() => setCreateOpen(false)}
               >
-                ×
-              </button>
+                <CloseIcon />              </button>
             </div>
             {atLimit && (
               <p className="mt-2 text-sm text-[var(--danger)]">
@@ -714,7 +767,7 @@ export function ProjectsPage() {
                   </select>
                 </label>
                 <label className="tb-label">
-                  Name *
+                  Name <span className="tb-req">*</span>
                   <input
                     className="tb-input"
                     value={name}
@@ -741,8 +794,7 @@ export function ProjectsPage() {
                   />
                   <span className="mt-1 flex justify-between gap-2 text-[11px] font-normal normal-case tracking-normal">
                     <span className={nameHint ? "text-[var(--danger)]" : "text-[var(--muted)]"}>
-                      {nameHint || "Alphabetical characters only · max 100 characters"}
-                    </span>
+                      {nameHint || "Alphabetical characters only \u2014 max 100 characters"}                    </span>
                     <span className="shrink-0 text-[var(--muted)]">
                       {normalizeProjectName(name).length}/{PROJECT_NAME_MAX_LENGTH}
                     </span>
@@ -836,13 +888,12 @@ export function ProjectsPage() {
                 aria-label="Close"
                 onClick={() => setEditProject(null)}
               >
-                ×
-              </button>
+                <CloseIcon />              </button>
             </div>
             <form className="mt-4" onSubmit={submitEdit}>
               <div className="grid gap-3">
                 <label className="tb-label">
-                  Name *
+                  Name <span className="tb-req">*</span>
                   <input
                     className="tb-input"
                     value={editName}
@@ -970,8 +1021,7 @@ export function ProjectsPage() {
         isLoading={projectsQuery.isLoading}
         error={projectsQuery.error}
         onRetry={() => void projectsQuery.refetch()}
-        loadingText="Loading projects…"
-      />
+        loadingText="Loading projects\u2026"      />
 
       {!projectsQuery.isLoading && !projectsQuery.error && (
         <div className="tb-card flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -1053,14 +1103,14 @@ export function ProjectsPage() {
                           </div>
                         </td>
                         <td className="tb-table-col tb-table-col-jira text-[var(--ink)]">
-                          {project.jiraProjectKey || "?"}
+                          {project.jiraProjectKey || "\u2014"}
                         </td>
                         <td className="tb-table-col tb-table-col-ado text-[var(--ink)]">
-                          {project.adoProject || "?"}
+                          {project.adoProject || "\u2014"}
                         </td>
                         <td className="tb-table-col-date">
                           <div className="tb-table-date-cell text-[var(--muted)]">
-                            <CalendarIcon /> ?
+                            <CalendarIcon /> {formatDate(project.createdAt)}
                           </div>
                         </td>
                         <td className="tb-table-actions-col">
@@ -1113,11 +1163,15 @@ export function ProjectsPage() {
                     <dl className="mt-3 space-y-1 text-xs text-[var(--muted)]">
                       <div className="flex justify-between gap-2">
                         <dt>Jira</dt>
-                        <dd className="text-[var(--ink)]">{project.jiraProjectKey || "?"}</dd>
+                        <dd className="text-[var(--ink)]">{project.jiraProjectKey || "\u2014"}</dd>
                       </div>
                       <div className="flex justify-between gap-2">
                         <dt>ADO</dt>
-                        <dd className="truncate text-[var(--ink)]">{project.adoProject || "?"}</dd>
+                        <dd className="truncate text-[var(--ink)]">{project.adoProject || "\u2014"}</dd>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <dt>Created</dt>
+                        <dd className="text-[var(--ink)]">{formatDate(project.createdAt)}</dd>
                       </div>
                     </dl>
                   </div>
@@ -1141,13 +1195,11 @@ export function ProjectsPage() {
                 aria-label="Previous page"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
               >
-                ‹
-              </button>
+                {"\u2039"}              </button>
               {pageNumbers(safePage, totalPages).map((p, i) =>
-                p === "?" ? (
+                p === "ellipsis" ? (
                   <span key={`e-${i}`} className="px-1 text-sm text-[var(--muted)]">
-                    …
-                  </span>
+                    {"\u2026"}                  </span>
                 ) : (
                   <button
                     key={p}
@@ -1166,8 +1218,7 @@ export function ProjectsPage() {
                 aria-label="Next page"
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               >
-                ›
-              </button>
+                {"\u203A"}              </button>
             </div>
             <div className="inline-flex items-center gap-2 text-sm text-[var(--muted)]">
               <PageSizeSelect
