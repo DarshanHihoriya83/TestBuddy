@@ -6,6 +6,7 @@ import "react-toastify/dist/ReactToastify.css";
 import { AuthProvider, useAuth } from "./auth";
 import { BugDetailPage } from "./pages/BugDetailPage";
 import { BugsPage } from "./pages/BugsPage";
+import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { HomePage } from "./pages/HomePage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -20,6 +21,7 @@ import { NavProvider } from "./components/AppNavigation";
 import { canTransferRoles, isSuperAdmin } from "./utils/roles";
 import { OrganizationsPage } from "./pages/OrganizationsPage";
 import { OrganizationDetailPage } from "./pages/OrganizationDetailPage";
+import { SuperAdminOverviewPage } from "./pages/SuperAdminOverviewPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,8 +38,14 @@ const queryClient = new QueryClient({
   },
 });
 
-function RequireAuth({ children }: { children: ReactNode }) {
-  const { token, ready } = useAuth();
+function RequireAuth({
+  children,
+  allowMustChange = false,
+}: {
+  children: ReactNode;
+  allowMustChange?: boolean;
+}) {
+  const { token, user, ready } = useAuth();
   if (!ready) {
     return (
       <div className="grid min-h-screen place-items-center text-sm text-[var(--muted)]">
@@ -46,6 +54,9 @@ function RequireAuth({ children }: { children: ReactNode }) {
     );
   }
   if (!token) return <Navigate to="/login" replace />;
+  if (!allowMustChange && user?.mustChangePassword) {
+    return <Navigate to="/change-password" replace />;
+  }
   return children;
 }
 
@@ -75,6 +86,20 @@ function RequireSuperAdmin({ children }: { children: ReactNode }) {
   return children;
 }
 
+/** SuperAdmin has no use for the marketing landing page — show the platform overview. */
+function HomeRoute() {
+  const { user, ready } = useAuth();
+  if (!ready) {
+    return (
+      <div className="grid min-h-screen place-items-center text-sm text-[var(--muted)]">
+        Checking session…
+      </div>
+    );
+  }
+  if (isSuperAdmin(user)) return <SuperAdminOverviewPage />;
+  return <HomePage />;
+}
+
 function AuthQueryBridge({ children }: { children: ReactNode }) {
   const { token } = useAuth();
   const qc = useQueryClient();
@@ -92,9 +117,17 @@ export default function App() {
           <BrowserRouter>
             <NavProvider>
               <Routes>
-                <Route path="/" element={<HomePage />} />
+                <Route path="/" element={<HomeRoute />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/register" element={<RegisterPage />} />
+                <Route
+                  path="/change-password"
+                  element={
+                    <RequireAuth allowMustChange>
+                      <ChangePasswordPage />
+                    </RequireAuth>
+                  }
+                />
                 <Route
                   path="/organizations"
                   element={

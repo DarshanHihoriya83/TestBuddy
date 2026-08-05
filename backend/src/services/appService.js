@@ -31,9 +31,15 @@ import {
   saveScreenshotFile,
   readScreenshotFile,
 } from "./screenshotStorage.js";
+import { checkPasswordStrength, generateTemporaryPassword } from "../passwordPolicy.js";
 
 const BCRYPT_ROUNDS = 12;
-const MIN_PASSWORD_LEN = 8;
+
+/**
+ * Compared against when the email is unknown, so a failed login costs the same
+ * time whether or not the account exists.
+ */
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("tb-dummy-password-placeholder", BCRYPT_ROUNDS);
 
 function blankToNull(value) {
   if (value == null || String(value).trim() === "") return null;
@@ -55,10 +61,9 @@ function assertAlphabeticalName(raw, label) {
   return name;
 }
 
-function assertPassword(password) {
-  if (password == null || String(password).length < MIN_PASSWORD_LEN) {
-    throw badRequest(`Password must be at least ${MIN_PASSWORD_LEN} characters`);
-  }
+function assertPassword(password, context = {}) {
+  const err = checkPasswordStrength(password, context);
+  if (err) throw badRequest(err);
 }
 
 function toUserDto(user) {
@@ -68,6 +73,9 @@ function toUserDto(user) {
     email: user.email,
     role: user.role,
     active: user.active !== false,
+    mustChangePassword: Boolean(
+      user.mustChangePassword ?? user.must_change_password,
+    ),
   };
 }
 
@@ -377,13 +385,19 @@ async function replaceSteps(client, bugId, steps) {
 
 export async function login({ email, password }) {
   const { rows } = await query(
-    `SELECT id, name, email, password_hash AS "passwordHash", role, active
+    `SELECT id, name, email, password_hash AS "passwordHash", role, active,
+            must_change_password AS "mustChangePassword"
      FROM users WHERE LOWER(email) = LOWER($1)`,
     [email],
   );
   const user = rows[0];
+  // Always run a compare so response time does not reveal whether the email exists
+  const passwordOk = await bcrypt.compare(
+    String(password || ""),
+    user?.passwordHash || DUMMY_PASSWORD_HASH,
+  );
   // Constant-ish failure message — don't reveal which part failed
-  if (!user || !(await bcrypt.compare(password || "", user.passwordHash))) {
+  if (!user || !passwordOk) {
     throw unauthorized("Invalid credentials");
   }
   if (user.active === false) {
@@ -399,9 +413,9 @@ export async function register({ name, email, password, role: _ignoredRole }) {
   if (!name?.trim() || name.trim().length < 2) {
     throw badRequest("Name must be at least 2 characters");
   }
-  assertPassword(password);
-  const normalized = email.trim().toLowerCase();
+  const normalized = String(email || "").trim().toLowerCase();
   if (!normalized.includes("@")) throw badRequest("Valid email is required");
+  assertPassword(password, { name, email: normalized });
 
   // Public signup is always TESTER — ignore any role from the client
   const assigned = "TESTER";
@@ -466,23 +480,42 @@ export async function updateProfile(current, { name, currentPassword, newPasswor
     throw badRequest("Name must be at least 2 characters");
   }
   let passwordHash = current.passwordHash;
+  const mustChange = Boolean(current.mustChangePassword ?? current.must_change_password);
   const changingPassword = newPassword != null && String(newPassword).trim() !== "";
+  if (mustChange && !changingPassword) {
+    throw badRequest("You must set a new password before continuing");
+  }
+  let nextMustChange = mustChange;
   if (changingPassword) {
     if (currentPassword == null || String(currentPassword).trim() === "") {
       throw badRequest("Current password is required");
     }
-    if (!(await bcrypt.compare(currentPassword, current.passwordHash))) {
+    if (!(await bcrypt.compare(String(currentPassword), current.passwordHash))) {
       throw badRequest("Current password is incorrect");
     }
-    assertPassword(newPassword);
+    assertPassword(newPassword, { name, email: current.email });
+    if (await bcrypt.compare(String(newPassword), current.passwordHash)) {
+      throw badRequest("New password must be different from your current password");
+    }
     passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+    nextMustChange = false;
   }
   const { rows } = await query(
-    `UPDATE users SET name = $1, password_hash = $2 WHERE id = $3
-     RETURNING id, name, email, role, active`,
-    [name.trim(), passwordHash, current.id],
+    `UPDATE users
+     SET name = $1,
+         password_hash = $2,
+         must_change_password = $3,
+         password_changed_at = CASE WHEN $4 THEN NOW() ELSE password_changed_at END
+     WHERE id = $5
+     RETURNING id, name, email, role, active, must_change_password AS "mustChangePassword",
+               password_changed_at AS "passwordChangedAt"`,
+    [name.trim(), passwordHash, nextMustChange, changingPassword, current.id],
   );
-  return toUserDto(rows[0]);
+  const dto = toUserDto(rows[0]);
+  if (!changingPassword) return dto;
+  // Older tokens are revoked, so hand back one stamped at the change itself.
+  const changedSec = Math.floor(new Date(rows[0].passwordChangedAt).getTime() / 1000);
+  return { ...dto, token: generateToken(dto.id, dto.email, changedSec) };
 }
 
 const USER_ROLE_ORDER = `
@@ -604,7 +637,7 @@ export async function removeProjectMember(actor, projectId, userId) {
     [projectId, userId],
   );
   if (!result.rowCount) throw notFound("User is not a member of this project");
-  return { ok: true };
+  return { ok: true, id: target.id, role: target.role };
 }
 
 /** Projects a user belongs to (for admin user view). */
@@ -629,11 +662,33 @@ export async function getUser(id) {
   return toUserDto(rows[0]);
 }
 
-export async function adminCreateUser(actor, { name, email, password, role }) {
+/** Org + project memberships for the Edit-user access panel (SuperAdmin / Manager). */
+export async function getUserMemberships(actor, id) {
+  const target = await getUser(id);
+  if (!canManageRole(actor, target.role) && actor.id !== target.id) {
+    throw forbidden("You cannot view this user’s memberships");
+  }
+  const { rows: orgRows } = await query(
+    `SELECT organization_id FROM organization_members WHERE user_id = $1 ORDER BY created_at ASC`,
+    [id],
+  );
+  const { rows: projectRows } = await query(
+    `SELECT project_id FROM project_members WHERE user_id = $1 ORDER BY created_at ASC`,
+    [id],
+  );
+  return {
+    organizationIds: orgRows.map((r) => r.organization_id),
+    projectIds: projectRows.map((r) => r.project_id),
+  };
+}
+
+export async function adminCreateUser(
+  actor,
+  { name, email, role, organizationId, projectIds = [] },
+) {
   if (!name?.trim() || name.trim().length < 2) {
     throw badRequest("Name must be at least 2 characters");
   }
-  assertPassword(password);
   const assigned = normalizeRole(role);
   if (!assigned) throw badRequest("Invalid role");
   if (!canAssignRole(actor, assigned)) {
@@ -651,18 +706,102 @@ export async function adminCreateUser(actor, { name, email, password, role }) {
     throw conflict("An account with this email already exists");
   }
 
+  const uniqueProjectIds = [
+    ...new Set(
+      (Array.isArray(projectIds) ? projectIds : [])
+        .map((id) => String(id || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  // Resolve + authorize projects before writing anything, so a bad id cannot
+  // leave a half-created user behind.
+  const projectRows = [];
+  for (const projectId of uniqueProjectIds) {
+    await assertCanManageProject(actor, projectId);
+    const project = await requireProject(projectId);
+    if (!project.organization_id) {
+      throw badRequest(`Project "${project.name}" has no organization`);
+    }
+    if (!isSuperAdmin(actor) && !(await isOrgMember(project.organization_id, actor.id))) {
+      throw forbidden("You can only assign projects in organizations you belong to");
+    }
+    projectRows.push(project);
+  }
+
+  // An explicit organization enrolls the user even when no project is picked.
+  const requestedOrgId = String(organizationId || "").trim();
+  if (requestedOrgId) {
+    const { rows: orgRows } = await query(`SELECT id FROM organizations WHERE id = $1`, [
+      requestedOrgId,
+    ]);
+    if (!orgRows[0]) throw badRequest("Unknown organization");
+    if (!isSuperAdmin(actor) && !(await isOrgMember(requestedOrgId, actor.id))) {
+      throw forbidden("You can only add users to organizations you belong to");
+    }
+  }
+
+  // Without explicit projects, still enroll Managers' new users into every org
+  // the manager belongs to so they show up in shared-org directories.
+  let fallbackOrgIds = [];
+  if (projectRows.length === 0 && isManager(actor) && !isSuperAdmin(actor)) {
+    const { rows: orgs } = await query(
+      `SELECT organization_id FROM organization_members WHERE user_id = $1`,
+      [actor.id],
+    );
+    fallbackOrgIds = orgs.map((r) => r.organization_id);
+  }
+
+  const temporaryPassword = generateTemporaryPassword();
   const id = randomUUID();
-  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-  const { rows } = await query(
-    `INSERT INTO users (id, name, email, password_hash, role, active)
-     VALUES ($1, $2, $3, $4, $5, true)
-     RETURNING id, name, email, role, active`,
-    [id, name.trim(), normalized, passwordHash, assigned],
-  );
-  return toUserDto(rows[0]);
+  const passwordHash = await bcrypt.hash(temporaryPassword, BCRYPT_ROUNDS);
+
+  const created = await withTransaction(async (client) => {
+    const { rows } = await client.query(
+      `INSERT INTO users (id, name, email, password_hash, role, active, must_change_password, password_changed_at)
+       VALUES ($1, $2, $3, $4, $5, true, true, NOW())
+       RETURNING id, name, email, role, active, must_change_password AS "mustChangePassword"`,
+      [id, name.trim(), normalized, passwordHash, assigned],
+    );
+
+    const orgIds = new Set(fallbackOrgIds);
+    if (requestedOrgId) orgIds.add(requestedOrgId);
+    for (const project of projectRows) {
+      orgIds.add(project.organization_id);
+    }
+    for (const organizationId of orgIds) {
+      await client.query(
+        `INSERT INTO organization_members (organization_id, user_id, created_at)
+         VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING`,
+        [organizationId, id],
+      );
+    }
+    for (const project of projectRows) {
+      await client.query(
+        `INSERT INTO project_members (project_id, user_id, created_at)
+         VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING`,
+        [project.id, id],
+      );
+    }
+
+    return rows[0];
+  });
+
+  return { ...toUserDto(created), temporaryPassword };
 }
 
-export async function adminUpdateUser(actor, id, { name, email, role, active, newPassword }) {
+export async function adminUpdateUser(
+  actor,
+  id,
+  { name, email, role, active, newPassword, organizationId, projectIds },
+) {
+  // Admins never choose a password for someone else — only the reset endpoint,
+  // which auto-generates one and forces a change, may touch credentials.
+  if (newPassword != null && String(newPassword) !== "") {
+    throw badRequest(
+      "Passwords cannot be set directly. Use Reset password to generate a temporary one.",
+    );
+  }
   const { rows: existingRows } = await query(
     `SELECT id, name, email, role, active FROM users WHERE id = $1`,
     [id],
@@ -724,30 +863,100 @@ export async function adminUpdateUser(actor, id, { name, email, role, active, ne
     nextActive = active;
   }
 
-  if (newPassword != null && String(newPassword).trim() !== "") {
-    if (!canManageRole(actor, target.role) && !isSuperAdmin(actor)) {
-      throw forbidden("You cannot reset this user’s password");
+  // SuperAdmin Edit mirrors Create: pick an org (mandatory in UI) and sync that
+  // org's project memberships. Other orgs/projects are left alone.
+  const syncAccess = organizationId !== undefined || projectIds !== undefined;
+  let requestedOrgId = null;
+  let desiredProjectIds = null;
+  if (syncAccess) {
+    if (!isSuperAdmin(actor)) {
+      throw forbidden("Only SuperAdmin can update organization or project access here");
     }
-    assertPassword(newPassword);
-    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
-    await query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [passwordHash, id]);
+    requestedOrgId = String(organizationId || "").trim();
+    if (!requestedOrgId) throw badRequest("Select an organization");
+    const { rows: orgRows } = await query(`SELECT id FROM organizations WHERE id = $1`, [
+      requestedOrgId,
+    ]);
+    if (!orgRows[0]) throw badRequest("Unknown organization");
+
+    if (projectIds !== undefined) {
+      desiredProjectIds = [
+        ...new Set(
+          (Array.isArray(projectIds) ? projectIds : [])
+            .map((pid) => String(pid || "").trim())
+            .filter(Boolean),
+        ),
+      ];
+      for (const projectId of desiredProjectIds) {
+        await assertCanManageProject(actor, projectId);
+        const project = await requireProject(projectId);
+        if (project.organization_id !== requestedOrgId) {
+          throw badRequest("Projects must belong to the selected organization");
+        }
+      }
+    }
   }
 
-  const { rows } = await query(
-    `UPDATE users SET name = $1, email = $2, role = $3, active = $4 WHERE id = $5
-     RETURNING id, name, email, role, active`,
-    [nextName, nextEmail, nextRole, nextActive, id],
-  );
-  return toUserDto(rows[0]);
+  return withTransaction(async (client) => {
+    const { rows } = await client.query(
+      `UPDATE users
+       SET name = $1,
+           email = $2,
+           role = $3,
+           active = $4,
+           password_changed_at = CASE
+             WHEN active IS DISTINCT FROM $4 THEN NOW()
+             ELSE password_changed_at
+           END
+       WHERE id = $5
+       RETURNING id, name, email, role, active, must_change_password AS "mustChangePassword"`,
+      [nextName, nextEmail, nextRole, nextActive, id],
+    );
+
+    if (requestedOrgId) {
+      await client.query(
+        `INSERT INTO organization_members (organization_id, user_id, created_at)
+         VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING`,
+        [requestedOrgId, id],
+      );
+
+      if (desiredProjectIds) {
+        const { rows: orgProjects } = await client.query(
+          `SELECT id FROM projects WHERE organization_id = $1`,
+          [requestedOrgId],
+        );
+        const orgProjectIds = orgProjects.map((p) => p.id);
+        const desired = new Set(desiredProjectIds);
+
+        for (const projectId of orgProjectIds) {
+          if (desired.has(projectId)) {
+            await client.query(
+              `INSERT INTO project_members (project_id, user_id, created_at)
+               VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING`,
+              [projectId, id],
+            );
+          } else {
+            await client.query(
+              `DELETE FROM project_members WHERE project_id = $1 AND user_id = $2`,
+              [projectId, id],
+            );
+          }
+        }
+      }
+    }
+
+    return toUserDto(rows[0]);
+  });
 }
 
-/** Privileged password reset — SuperAdmin / Manager per canManageRole. */
-export async function adminResetPassword(actor, id, newPassword) {
+/** Privileged password reset — SuperAdmin / Manager per canManageRole. Auto-generates a temporary password. */
+export async function adminResetPassword(actor, id) {
   if (actor.id === id) {
     throw badRequest("Use profile settings to change your own password");
   }
   const { rows } = await query(
-    `SELECT id, name, email, role, active FROM users WHERE id = $1`,
+    `SELECT id, name, email, role, active, must_change_password AS "mustChangePassword"
+     FROM users WHERE id = $1`,
     [id],
   );
   const target = rows[0];
@@ -755,10 +964,20 @@ export async function adminResetPassword(actor, id, newPassword) {
   if (!canManageRole(actor, target.role)) {
     throw forbidden("You cannot reset this user’s password");
   }
-  assertPassword(newPassword);
-  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
-  await query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [passwordHash, id]);
-  return toUserDto(target);
+  if (target.active === false) {
+    throw badRequest("Reactivate this user before resetting their password");
+  }
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await bcrypt.hash(temporaryPassword, BCRYPT_ROUNDS);
+  // password_changed_at bump signs out every existing session for this user.
+  const { rows: updated } = await query(
+    `UPDATE users
+     SET password_hash = $1, must_change_password = true, password_changed_at = NOW()
+     WHERE id = $2
+     RETURNING id, name, email, role, active, must_change_password AS "mustChangePassword"`,
+    [passwordHash, id],
+  );
+  return { ...toUserDto(updated[0]), temporaryPassword };
 }
 
 /** Soft-delete (deactivate). Managers may deactivate users they manage. */
@@ -777,8 +996,15 @@ export async function adminDeleteUser(actor, id) {
     if (cnt[0].c <= 1) throw badRequest("Cannot delete the last SuperAdmin");
   }
 
-  // Soft-delete — keep bug history (reporter/assignee IDs)
-  await query(`UPDATE users SET active = false WHERE id = $1`, [id]);
+  // Soft-delete — keep bug history. Advance the session cutoff as well, so
+  // tokens held before deactivation cannot come back to life after reactivation.
+  await query(
+    `UPDATE users
+     SET active = false,
+         password_changed_at = CASE WHEN active = true THEN NOW() ELSE password_changed_at END
+     WHERE id = $1`,
+    [id],
+  );
   return { ok: true };
 }
 

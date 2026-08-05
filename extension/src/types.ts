@@ -22,6 +22,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  mustChangePassword?: boolean;
 }
 
 export interface Project {

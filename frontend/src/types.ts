@@ -33,7 +33,12 @@ export interface User {
   email: string;
   role: UserRole;
   active?: boolean;
+  /** True until the user replaces their auto-generated temporary password. */
+  mustChangePassword?: boolean;
 }
+
+/** Admin create/reset response — temporaryPassword is shown once. */
+export type UserWithTemporaryPassword = User & { temporaryPassword: string };
 
 export interface Project {
   id: string;

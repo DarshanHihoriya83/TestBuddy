@@ -24,19 +24,34 @@ function NavIcon({ name }: { name: string }) {
     case "Home":
       return (
         <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" />
+          <path
+            d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinejoin="round"
+          />
         </svg>
       );
     case "Projects":
       return (
         <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-10Z" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" />
+          <path
+            d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-10Z"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinejoin="round"
+          />
         </svg>
       );
     case "Bugs":
       return (
         <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path d="M12 3v3M8 6l-2-2M16 6l2-2M6 12H3M21 12h-3M8 18l-2 2M16 18l2 2M12 21v-3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+          <path
+            d="M12 3v3M8 6l-2-2M16 6l2-2M6 12H3M21 12h-3M8 18l-2 2M16 18l2 2M12 21v-3"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+          />
           <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.75" />
         </svg>
       );
@@ -44,35 +59,108 @@ function NavIcon({ name }: { name: string }) {
       return (
         <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden>
           <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.75" />
-          <path d="M3 19c0-2.8 2.7-5 6-5s6 2.2 6 5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
-          <path d="M16 11h5M18.5 8.5v5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+          <path
+            d="M3 19c0-2.8 2.7-5 6-5s6 2.2 6 5"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+          />
+          <path
+            d="M16 11h5M18.5 8.5v5"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+          />
         </svg>
       );
     case "Organizations":
       return (
         <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden>
-          <rect x="3" y="7" width="7" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
-          <rect x="14" y="3" width="7" height="17" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
+          <rect
+            x="3"
+            y="7"
+            width="7"
+            height="13"
+            rx="1.5"
+            stroke="currentColor"
+            strokeWidth="1.75"
+          />
+          <rect
+            x="14"
+            y="3"
+            width="7"
+            height="17"
+            rx="1.5"
+            stroke="currentColor"
+            strokeWidth="1.75"
+          />
+        </svg>
+      );
+    case "Overview":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden>
+          <rect
+            x="3"
+            y="3"
+            width="7"
+            height="9"
+            rx="1.5"
+            stroke="currentColor"
+            strokeWidth="1.75"
+          />
+          <rect
+            x="14"
+            y="3"
+            width="7"
+            height="5"
+            rx="1.5"
+            stroke="currentColor"
+            strokeWidth="1.75"
+          />
+          <rect
+            x="3"
+            y="16"
+            width="7"
+            height="5"
+            rx="1.5"
+            stroke="currentColor"
+            strokeWidth="1.75"
+          />
+          <rect
+            x="14"
+            y="12"
+            width="7"
+            height="9"
+            rx="1.5"
+            stroke="currentColor"
+            strokeWidth="1.75"
+          />
         </svg>
       );
     default:
       return (
         <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden>
           <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.75" />
-          <path d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+          <path
+            d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+          />
         </svg>
       );
   }
 }
 
 function buildNavItems(user: ReturnType<typeof useAuth>["user"]): NavItem[] {
+  const superAdmin = isSuperAdmin(user);
   const items: NavItem[] = BASE_NAV.filter(
-    (item) =>
-      !(isSuperAdmin(user) && (item.to === "/bugs" || item.to === "/projects")),
-  ).map((item) => ({
-    ...item,
-    icon: <NavIcon name={item.label} />,
-  }));
+    (item) => !(superAdmin && (item.to === "/bugs" || item.to === "/projects")),
+  ).map((item) => {
+    // SuperAdmin lands on the platform overview instead of the product landing page.
+    const label = superAdmin && item.to === "/" ? "Overview" : item.label;
+    return { ...item, label, icon: <NavIcon name={label} /> };
+  });
   if (isSuperAdmin(user)) {
     items.splice(1, 0, {
       to: "/organizations",
@@ -288,7 +376,14 @@ export function NavDrawer() {
 
 function HomeIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden className="shrink-0 text-[var(--muted)]">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className="shrink-0 text-[var(--muted)]"
+    >
       <path
         d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"
         stroke="currentColor"
@@ -327,9 +422,7 @@ export function AppSidebar() {
           }`}
           title="TestBuddy"
         >
-          <div className="tb-sidebar-accent h-10 w-10 text-xs">
-            TB
-          </div>
+          <div className="tb-sidebar-accent h-10 w-10 text-xs">TB</div>
           <div className="tb-sidebar-label min-w-0 leading-tight">
             <p className="truncate text-sm font-bold tracking-tight text-[var(--ink)]">TestBuddy</p>
             <p className="truncate text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--muted)]">
@@ -371,9 +464,7 @@ export function AppSidebar() {
                 expanded ? "gap-3 px-2" : "justify-center px-0"
               }`}
             >
-              <div className="tb-sidebar-accent h-10 w-10 text-sm">
-                {initials}
-              </div>
+              <div className="tb-sidebar-accent h-10 w-10 text-sm">{initials}</div>
               <div className="tb-sidebar-label min-w-0">
                 <p className="truncate text-sm font-semibold text-[var(--ink)]">{user.name}</p>
                 <p className="truncate text-xs text-[var(--muted)]">{roleLabel(user.role)}</p>
@@ -389,7 +480,14 @@ export function AppSidebar() {
                   : "mx-auto grid h-10 w-10 place-items-center text-[var(--muted)] hover:bg-[var(--bg0)] hover:text-[var(--ink)]"
               }`}
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden className="shrink-0">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden
+                className="shrink-0"
+              >
                 <path
                   d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"
                   stroke="currentColor"
@@ -427,16 +525,25 @@ export function PageBreadcrumb({
   title: string;
   crumbs?: BreadcrumbItem[];
 }) {
+  const { user } = useAuth();
+  const rootLabel = isSuperAdmin(user) ? "Overview" : "Home";
+  // On the root page itself the trailing segment would just repeat the root link.
+  const showTitle = crumbs.length > 0 || title !== rootLabel;
   return (
     <div className="tb-breadcrumb-bar">
-      <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-sm text-[var(--muted)]">
+      <nav
+        aria-label="Breadcrumb"
+        className="flex min-w-0 items-center gap-2 text-sm text-[var(--muted)]"
+      >
         <Link
           to="/"
-          className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 transition hover:bg-[var(--bg0)] hover:text-[var(--ink)]"
-          title="Home"
+          className={`inline-flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 transition hover:bg-[var(--bg0)] hover:text-[var(--ink)] ${
+            showTitle ? "" : "font-semibold text-[var(--accent)]"
+          }`}
+          title={rootLabel}
         >
           <HomeIcon />
-          <span className="hidden sm:inline">Home</span>
+          <span className="hidden sm:inline">{rootLabel}</span>
         </Link>
         {crumbs.map((crumb) => (
           <span key={`${crumb.to ?? ""}-${crumb.label}`} className="contents">
@@ -456,10 +563,14 @@ export function PageBreadcrumb({
             )}
           </span>
         ))}
-        <span aria-hidden className="select-none text-[var(--muted)] opacity-60">
-          {"\u203A"}
-        </span>
-        <span className="truncate font-semibold text-[var(--accent)]">{title}</span>
+        {showTitle && (
+          <>
+            <span aria-hidden className="select-none text-[var(--muted)] opacity-60">
+              {"\u203A"}
+            </span>
+            <span className="truncate font-semibold text-[var(--accent)]">{title}</span>
+          </>
+        )}
       </nav>
     </div>
   );

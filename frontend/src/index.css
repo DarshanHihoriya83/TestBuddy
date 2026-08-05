@@ -52,8 +52,12 @@ pre,
   border-radius: 1rem;
   border: 1px solid var(--line);
   background: var(--panel);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.04);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  box-shadow:
+    0 1px 3px rgba(15, 23, 42, 0.06),
+    0 8px 24px rgba(15, 23, 42, 0.04);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .tb-card-accent {
@@ -101,7 +105,10 @@ pre,
   margin: 0;
   padding: 0;
   pointer-events: none;
-  transition: opacity 0.15s ease, max-width 0.22s ease, width 0.22s ease;
+  transition:
+    opacity 0.15s ease,
+    max-width 0.22s ease,
+    width 0.22s ease;
 }
 
 .tb-sidebar.is-expanded .tb-sidebar-label {
@@ -116,7 +123,10 @@ pre,
   margin: 0;
   overflow: hidden;
   opacity: 0;
-  transition: opacity 0.15s ease, height 0.22s ease, margin 0.22s ease;
+  transition:
+    opacity 0.15s ease,
+    height 0.22s ease,
+    margin 0.22s ease;
 }
 
 .tb-sidebar.is-expanded .tb-sidebar-menu-title {
@@ -185,7 +195,9 @@ pre,
   color: var(--ink);
   padding: 0.625rem 0.75rem;
   font-size: 0.875rem;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .tb-input:hover,
@@ -194,12 +206,87 @@ pre,
   border-color: #cbd5e1;
 }
 
+/* Control sitting in a row rather than under a stacked label, where the
+   shared 0.5rem top margin would knock it out of alignment. */
+.tb-select-inline {
+  margin-top: 0;
+}
+
+/* Icon-prefixed field. Plain CSS because .tb-input's padding shorthand
+   outranks Tailwind's layered pl-* utility and would sit under the icon. */
+.tb-field-icon {
+  position: relative;
+  margin-top: 0.5rem;
+}
+
+.tb-field-icon > .tb-field-icon-slot {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  color: var(--muted);
+}
+
+.tb-field-icon > .tb-field-icon-slot svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.tb-field-icon .tb-input,
+.tb-field-icon .tb-select {
+  margin-top: 0;
+  padding-left: 2.5rem;
+}
+
+.tb-field-icon .tb-input.tb-input-trailing {
+  padding-right: 2.75rem;
+}
+
+.tb-field-icon > .tb-field-icon-action {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tb-field-icon > .tb-field-icon-action:hover {
+  background: var(--bg0);
+  color: var(--ink);
+}
+
+.tb-field-icon > .tb-field-icon-action svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
 .tb-input:focus,
 .tb-select:focus,
 .tb-textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.tb-input-invalid,
+.tb-input-invalid:hover {
+  border-color: var(--danger);
+}
+
+.tb-input-invalid:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
 }
 
 .tb-btn-primary {
@@ -215,7 +302,10 @@ pre,
   padding: 0.7rem 1.25rem;
   border: none;
   cursor: pointer;
-  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+  transition:
+    background 0.15s,
+    transform 0.1s,
+    box-shadow 0.15s;
   box-shadow: 0 2px 8px var(--accent-glow);
 }
 
@@ -241,8 +331,14 @@ pre,
   font-size: 0.875rem;
   font-weight: 600;
   padding: 0.625rem 1rem;
+  /* Row action bars pack several of these into a nowrap flex row; without this
+     the labels break mid-word and the button gets clipped. */
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
 
 .tb-btn-ghost:hover:not(:disabled) {
@@ -267,7 +363,9 @@ pre,
   color: var(--ink);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
 
 .tb-btn-icon:hover {
@@ -426,6 +524,68 @@ pre,
   transition: background 0.15s ease;
 }
 
+/* Organizations directory — shared by the table and card views. */
+.tb-org-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  padding: 1rem;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease,
+    background 0.18s ease;
+}
+
+.tb-org-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: color-mix(in srgb, var(--bg0) 70%, #ffffff);
+  transform: translateY(-2px);
+  box-shadow:
+    0 4px 10px rgba(15, 23, 42, 0.06),
+    0 10px 24px rgba(0, 120, 212, 0.1);
+}
+
+.tb-org-avatar {
+  display: grid;
+  height: 2.25rem;
+  width: 2.25rem;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 0.75rem;
+  background: var(--accent-soft);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.tb-usage-track {
+  display: block;
+  height: 0.3rem;
+  width: 4rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 18%, #fff);
+}
+
+.tb-usage-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.tb-usage-fill.is-high {
+  background: #d97706;
+}
+
+.tb-usage-fill.is-full {
+  background: var(--danger);
+}
+
 .tb-view-toggle {
   display: inline-flex;
   overflow: hidden;
@@ -438,7 +598,9 @@ pre,
   height: 2.25rem;
   width: 2.25rem;
   place-items: center;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .tb-view-toggle-btn:hover:not(.is-active) {
@@ -459,7 +621,9 @@ pre,
   padding: 0.5rem 0.75rem 0.5rem 2.5rem;
   font-size: 0.875rem;
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .tb-search-input:hover {
@@ -478,7 +642,9 @@ pre,
   place-items: center;
   border-radius: 999px;
   color: var(--muted);
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .tb-kebab-btn:hover,
@@ -601,7 +767,10 @@ main textarea:focus {
   font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .tb-page-btn:hover:not(:disabled):not(.tb-page-btn-active) {
@@ -664,7 +833,10 @@ main textarea:focus {
   color: #fff;
   font-weight: 700;
   box-shadow: 0 2px 8px var(--accent-glow);
-  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.1s ease;
 }
 
 .tb-sidebar-accent:hover {
@@ -685,7 +857,9 @@ main textarea:focus {
 .tb-modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  /* Must beat .tb-sidebar (40). Tailwind's z-50 cannot do it from JSX: its
+     utilities sit in a cascade layer that unlayered rules like this one win. */
+  z-index: 60;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -734,6 +908,153 @@ main textarea:focus {
   overflow: hidden;
   max-height: none;
   animation: tbFade 0.2s ease-out;
+}
+
+/* Dialog surface: softer radius and a layered shadow so the panel reads as
+   floating glass over the blurred backdrop rather than a flat card. */
+.tb-dialog {
+  border-radius: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: var(--panel);
+  box-shadow:
+    0 1px 1px rgba(15, 23, 42, 0.04),
+    0 12px 32px -8px rgba(15, 23, 42, 0.18),
+    0 40px 80px -24px rgba(15, 23, 42, 0.32);
+  animation: tbDialogIn 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes tbDialogIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.tb-dialog-header {
+  position: relative;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.tb-dialog-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.875rem 1.5rem;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--bg0) 0%, var(--bg1) 100%);
+}
+
+/* Selectable option row (role picker). Fixed padding and a single-line
+   description keep every row the same height, so choosing one never reflows
+   the list. Inset ring instead of a fatter border for the same reason. */
+.tb-option-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  cursor: pointer;
+  border-radius: 0.875rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 0.75rem 0.875rem;
+  text-align: left;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.tb-option-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: var(--bg0);
+}
+
+.tb-option-row:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.tb-option-row[data-selected="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.tb-option-row[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.tb-option-row[aria-disabled="true"]:hover {
+  border-color: var(--line);
+  background: var(--panel);
+}
+
+/* "×" affordance inside a selected-item chip. */
+.tb-chip-remove {
+  display: grid;
+  place-items: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-right: -0.25rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.875rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.tb-chip-remove:hover {
+  background: var(--accent-soft);
+}
+
+/* Radio dot on the right edge of an option row. */
+.tb-option-dot {
+  display: grid;
+  place-items: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1.5px solid var(--line);
+  background: #ffffff;
+  transition: border-color 0.15s ease;
+}
+
+.tb-option-dot::after {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--accent);
+  transform: scale(0);
+  transition: transform 0.15s ease;
+}
+
+.tb-option-row[data-selected="true"] .tb-option-dot {
+  border-color: var(--accent);
+}
+
+.tb-option-row[data-selected="true"] .tb-option-dot::after {
+  transform: scale(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tb-dialog,
+  .tb-modal-panel {
+    animation: none;
+  }
 }
 
 /* react-toastify — top-right alerts */
@@ -985,13 +1306,322 @@ main textarea:focus {
   padding: 0.45rem 0.75rem;
   font-size: 0.8125rem;
   color: var(--ink);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .tb-filter-select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.tb-filter-select:hover {
+  border-color: #cbd5e1;
+}
+
+/* Single-row filter toolbar: search grows, controls hug the right edge. */
+.tb-filter-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.tb-filter-search {
+  position: relative;
+  flex: 1 1 16rem;
+  min-width: 14rem;
+  max-width: 26rem;
+}
+
+.tb-filter-search > .tb-search-input {
+  padding-right: 4.25rem;
+}
+
+.tb-filter-search-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  color: var(--muted);
+}
+
+.tb-filter-search-clear {
+  position: absolute;
+  right: 0.4rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.tb-filter-search-clear:hover {
+  background: var(--bg0);
+  color: var(--ink);
+}
+
+/* Discoverability hint for the "/" focus shortcut; hidden once typing starts. */
+.tb-kbd {
+  position: absolute;
+  right: 0.6rem;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  border: 1px solid var(--line);
+  border-radius: 0.375rem;
+  background: var(--bg0);
+  padding: 0.05rem 0.35rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.tb-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--line);
+  background: var(--bg0);
+  padding: 0.15rem;
+}
+
+.tb-segment-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 0.6rem;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted);
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.tb-segment-btn:hover:not(.is-active) {
+  color: var(--ink);
+}
+
+.tb-segment-btn.is-active {
+  background: #fff;
+  color: var(--accent);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
+}
+
+.tb-count-pill {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 14%, #fff);
+  padding: 0 0.35rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.tb-segment-btn.is-active .tb-count-pill {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* Applied-filter summary strip below the toolbar. */
+.tb-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg0) 55%, #fff);
+  padding: 0.5rem 1rem;
+}
+
+.tb-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  max-width: 18rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+  background: var(--accent-soft);
+  padding: 0.2rem 0.4rem 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.tb-filter-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Users directory rows. Fixed-width columns keep designation, status and the
+   action controls aligned down the list instead of drifting with name length. */
+.tb-user-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg0) 55%, #fff);
+  padding: 0.5rem 1rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tb-user-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
+  transition: background 0.15s ease;
+}
+
+.tb-user-row:hover {
+  background: color-mix(in srgb, var(--bg0) 60%, #fff);
+}
+
+.tb-user-col-role {
+  width: 9.5rem;
+  flex-shrink: 0;
+}
+
+.tb-user-col-status {
+  width: 7rem;
+  flex-shrink: 0;
+}
+
+.tb-user-col-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  width: 10.5rem;
+  flex-shrink: 0;
+}
+
+.tb-user-avatar {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: linear-gradient(145deg, var(--accent-soft), #dbeafe);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.tb-role-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.tb-role-chip.is-superadmin {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+  color: #6d28d9;
+}
+
+.tb-role-chip.is-manager {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.tb-role-chip.is-developer {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #c2410c;
+}
+
+.tb-role-chip.is-tester {
+  background: #ecfeff;
+  border-color: #a5f3fc;
+  color: #0e7490;
+}
+
+.tb-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tb-status-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.tb-status-pill.is-active {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #047857;
+}
+
+.tb-status-pill.is-inactive {
+  background: #fff1f2;
+  border-color: #fecdd3;
+  color: #be123c;
+}
+
+@media (max-width: 640px) {
+  .tb-user-head {
+    display: none;
+  }
+
+  .tb-user-row {
+    flex-wrap: wrap;
+  }
+
+  .tb-user-col-role,
+  .tb-user-col-status,
+  .tb-user-col-actions {
+    width: auto;
+  }
+
+  .tb-user-col-actions {
+    margin-left: auto;
+  }
 }
 
 .tb-bug-stat {
@@ -1140,4 +1770,3 @@ main textarea:focus {
     transform: none;
   }
 }
-

@@ -11,6 +11,7 @@ import type {
   TestCase,
   TestCaseFilters,
   User,
+  UserWithTemporaryPassword,
 } from "./types";
 import { forceLogout } from "./authEvents";
 
@@ -32,8 +33,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (res.status === 401) {
     // Don't logout on failed login/register attempts
-    const isAuthAttempt =
-      path.includes("/api/auth/login") || path.includes("/api/auth/register");
+    const isAuthAttempt = path.includes("/api/auth/login") || path.includes("/api/auth/register");
     if (!isAuthAttempt) {
       forceLogout();
     }
@@ -86,39 +86,34 @@ export async function register(body: {
 
 export const fetchMe = () => api<User>("/api/auth/me");
 
+/** Changing the password revokes older tokens, so the response carries a fresh one. */
 export function updateProfile(body: {
   name: string;
   currentPassword?: string;
   newPassword?: string;
 }) {
-  return api<User>("/api/auth/profile", {
+  return api<User & { token?: string }>("/api/auth/profile", {
     method: "PUT",
     body: JSON.stringify(body),
   });
 }
 
 export const fetchUsers = (projectId?: string) =>
-  api<User[]>(
-    projectId
-      ? `/api/users?projectId=${encodeURIComponent(projectId)}`
-      : "/api/users",
-  );
+  api<User[]>(projectId ? `/api/users?projectId=${encodeURIComponent(projectId)}` : "/api/users");
 
 export const fetchAdminUsers = (projectId?: string) =>
   api<User[]>(
-    projectId
-      ? `/api/users/admin?projectId=${encodeURIComponent(projectId)}`
-      : "/api/users/admin",
+    projectId ? `/api/users/admin?projectId=${encodeURIComponent(projectId)}` : "/api/users/admin",
   );
 
 export function adminCreateUser(body: {
   name: string;
   email: string;
-  password: string;
   role: string;
+  organizationId?: string;
   projectIds?: string[];
 }) {
-  return api<User>("/api/users", {
+  return api<UserWithTemporaryPassword>("/api/users", {
     method: "POST",
     body: JSON.stringify(body),
   });
@@ -131,7 +126,8 @@ export function adminUpdateUser(
     email?: string;
     role?: string;
     active?: boolean;
-    newPassword?: string;
+    organizationId?: string;
+    projectIds?: string[];
   },
 ) {
   return api<User>(`/api/users/${id}`, {
@@ -140,10 +136,14 @@ export function adminUpdateUser(
   });
 }
 
-export function adminResetPassword(id: string, newPassword: string) {
-  return api<User>(`/api/users/${id}/reset-password`, {
+export function fetchUserMemberships(id: string) {
+  return api<{ organizationIds: string[]; projectIds: string[] }>(`/api/users/${id}/memberships`);
+}
+
+export function adminResetPassword(id: string) {
+  return api<UserWithTemporaryPassword>(`/api/users/${id}/reset-password`, {
     method: "POST",
-    body: JSON.stringify({ newPassword }),
+    body: JSON.stringify({}),
   });
 }
 
@@ -207,13 +207,11 @@ export const updateProject = (
   body: Omit<ProjectPayload, "organizationId"> & { organizationId?: string },
 ) => api<Project>(`/api/projects/${id}`, { method: "PUT", body: JSON.stringify(body) });
 
-export const deleteProject = (id: string) =>
-  api<void>(`/api/projects/${id}`, { method: "DELETE" });
+export const deleteProject = (id: string) => api<void>(`/api/projects/${id}`, { method: "DELETE" });
 
 export const fetchOrganizations = () => api<Organization[]>("/api/organizations");
 
-export const fetchOrganization = (id: string) =>
-  api<Organization>(`/api/organizations/${id}`);
+export const fetchOrganization = (id: string) => api<Organization>(`/api/organizations/${id}`);
 
 export function createOrganization(body: { name: string; maxProjects?: number }) {
   return api<Organization>("/api/organizations", {
@@ -222,10 +220,7 @@ export function createOrganization(body: { name: string; maxProjects?: number })
   });
 }
 
-export function updateOrganization(
-  id: string,
-  body: { name?: string; maxProjects?: number },
-) {
+export function updateOrganization(id: string, body: { name?: string; maxProjects?: number }) {
   return api<Organization>(`/api/organizations/${id}`, {
     method: "PUT",
     body: JSON.stringify(body),
@@ -273,8 +268,7 @@ export function deleteModule(id: string) {
   return api<void>(`/api/modules/${id}`, { method: "DELETE" });
 }
 
-export const fetchBugComments = (bugId: string) =>
-  api<BugComment[]>(`/api/bugs/${bugId}/comments`);
+export const fetchBugComments = (bugId: string) => api<BugComment[]>(`/api/bugs/${bugId}/comments`);
 
 export function createBugComment(bugId: string, body: string) {
   return api<BugComment>(`/api/bugs/${bugId}/comments`, {
@@ -315,8 +309,7 @@ export function updateBug(
   });
 }
 
-export const deleteBug = (id: string) =>
-  api<void>(`/api/bugs/${id}`, { method: "DELETE" });
+export const deleteBug = (id: string) => api<void>(`/api/bugs/${id}`, { method: "DELETE" });
 
 export const fetchCycles = (projectId: string) =>
   api<Cycle[]>(`/api/cycles?projectId=${encodeURIComponent(projectId)}`);
@@ -432,4 +425,3 @@ export function updateTestCase(
 
 export const deleteTestCase = (id: string) =>
   api<void>(`/api/testcases/${id}`, { method: "DELETE" });
-

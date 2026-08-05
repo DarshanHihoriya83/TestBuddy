@@ -68,7 +68,7 @@ Mirror these in the Node backend (DB rows / mappers) and as TypeScript interface
 - **Modules (create/edit/delete):** Manager | Tester only (accessible projects); SuperAdmin view-only
 - **Create bug:** includes Tester (on accessible projects only)
 - **Bug status + comments:** Developer and Tester (plus Manager/SuperAdmin)
-- **User CRUD / role assign:** SuperAdmin | Manager (Manager: Manager/Developer/Tester)
+- **User CRUD / role assign:** SuperAdmin | Manager; both may create/assign Manager, Developer, and Tester. SUPERADMIN is a reserved bootstrap role and cannot be created or assigned through the UI/API. Create/reset auto-generates a temporary password (`mustChangePassword`) — user must change it before app/extension access. Admins never set a password directly.
 - **User hard-delete:** SuperAdmin, only after deactivate
 
 ## API surface (owned by backend)
@@ -79,6 +79,15 @@ AI routes (`/ai/...`) live **only** on the Python service and are called server-
 ## Privacy
 
 Never store raw password / sensitive autocomplete values — use `••••` and blur those regions in screenshots by default.
+
+## Password & session rules
+
+- Policy lives in `backend/src/passwordPolicy.js`, mirrored in `frontend/src/utils/validation.ts` — change both together.
+- User-chosen passwords: 10–128 chars, lower + upper + digit + symbol, no spaces, no 3× repeats, not common, not containing the user's name/email.
+- Temporary passwords are generated server-side only (`generateTemporaryPassword`), returned once, and force `mustChangePassword`.
+- `users.password_changed_at` is the session cut-off: any JWT with `iat` older than it is rejected in `optionalAuth`. A password change reissues a token stamped at the change.
+- Routes reachable while a forced change is pending must opt in with `allowPasswordChangePending` — never match on URL strings.
+- Any response carrying a plaintext temporary password must use the `noStore` middleware and be recorded via `logSecurityEvent` (actor, target, IP — never the password).
 
 ## Phase discipline
 

@@ -1,32 +1,53 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Navigate } from "react-router-dom";
 import {
-  adminCreateUser,
   adminDeleteUser,
   adminHardDeleteUser,
   adminUpdateUser,
   fetchAdminUsers,
+  fetchOrganizations,
   fetchProjects,
 } from "../api";
 import { useAuth } from "../auth";
 import { FlashAlert } from "../components/FlashAlert";
 import { PageHeader } from "../components/PageHeader";
+import { Pagination } from "../components/Pagination";
 import { QueryStatus } from "../components/QueryStatus";
 import { Shell } from "../components/Shell";
 import { UserFiltersBar, type StatusFilter } from "../components/users/UserFiltersBar";
-import { ChangeRoleForm, CreateUserForm, EditUserForm } from "../components/users/UserForms";
+import { CreateUserModal } from "../components/users/CreateUserModal";
+import { ResetPasswordModal } from "../components/users/ResetPasswordModal";
+import { ChangeRoleModal } from "../components/users/ChangeRoleModal";
+import { EditUserModal, type EditUserAccess } from "../components/users/EditUserModal";
+import { UserActionsMenu } from "../components/users/UserActionsMenu";
 import { queryKeys } from "../queryKeys";
-import type { User, UserRole } from "../types";
+import type { User, UserRole, UserWithTemporaryPassword } from "../types";
 import {
   assignableRoles,
   canChangeUserRole,
+  canManageRole,
   canTransferRoles,
   isAdmin,
   isSuperAdmin,
   roleLabel,
 } from "../utils/roles";
+import { notifyError, notifySuccess } from "../utils/notify";
+import { paginate } from "../utils/pagination";
 import { validateEmail, validateName } from "../utils/validation";
+
+const ROLE_CHIP_CLASS: Partial<Record<UserRole, string>> = {
+  SUPERADMIN: "is-superadmin",
+  MANAGER: "is-manager",
+  DEVELOPER: "is-developer",
+  TESTER: "is-tester",
+};
+
+function userInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
 
 export function UsersPage() {
   const { user: me } = useAuth();
@@ -39,19 +60,17 @@ export function UsersPage() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<"ALL" | UserRole>("ALL");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [showCreate, setShowCreate] = useState(false);
 
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState<UserRole>("TESTER");
-  const [createProjectIds, setCreateProjectIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState<User | null>(null);
-  const [editPassword, setEditPassword] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [resetUser, setResetUser] = useState<User | null>(null);
   const [roleChangeUser, setRoleChangeUser] = useState<User | null>(null);
-  const [roleChangeValue, setRoleChangeValue] = useState<UserRole>("TESTER");
+  const [roleChangeError, setRoleChangeError] = useState<string | null>(null);
 
   const projectsQuery = useQuery({
     queryKey: queryKeys.projects(),
@@ -65,8 +84,20 @@ export function UsersPage() {
     enabled: canRoles,
   });
 
+  // SuperAdmin picks the target org when creating a user; nobody else needs the list.
+  const organizationsQuery = useQuery({
+    queryKey: queryKeys.organizations,
+    queryFn: fetchOrganizations,
+    enabled: canFullUserAdmin && isSuperAdmin(me),
+  });
+
   const allUsers = usersQuery.data ?? [];
   const projects = projectsQuery.data ?? [];
+  const organizations = organizationsQuery.data ?? [];
+  const createProjectDefaults = useMemo(
+    () => (projectFilter ? [projectFilter] : []),
+    [projectFilter],
+  );
 
   const roleCounts = useMemo(() => {
     const map: Record<string, number> = { ALL: allUsers.length };
@@ -101,56 +132,69 @@ export function UsersPage() {
     });
   }, [allUsers, roleFilter, statusFilter, search]);
 
+  const { totalPages, safePage, startIdx, endIdx, pageItems } = paginate(filtered, page, pageSize);
+
+  // A narrowed result set should start from the top, not from whatever page
+  // number happened to be selected for the previous one.
+  useEffect(() => {
+    setPage(1);
+  }, [search, roleFilter, statusFilter, projectFilter, pageSize]);
+
   const invalidateUsers = async () => {
     await queryClient.invalidateQueries({ queryKey: ["users-admin"] });
     await queryClient.invalidateQueries({ queryKey: ["users"] });
     await queryClient.invalidateQueries({ queryKey: ["project-members"] });
+    await queryClient.invalidateQueries({ queryKey: ["user-memberships"] });
+    await queryClient.invalidateQueries({ queryKey: ["organization-members"] });
   };
 
-  const createMutation = useMutation({
-    mutationFn: adminCreateUser,
-    onSuccess: async () => {
-      setName("");
-      setEmail("");
-      setPassword("");
-      setRole(roles.includes("TESTER") ? "TESTER" : roles[0] || "TESTER");
-      setCreateProjectIds(projectFilter ? [projectFilter] : []);
-      setShowCreate(false);
-      setMessage("User created");
-      setError(null);
-      await invalidateUsers();
-    },
-    onError: (err: Error) => {
-      setError(err.message);
-      setMessage(null);
-    },
-  });
-
   const updateMutation = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: Parameters<typeof adminUpdateUser>[1] }) =>
-      adminUpdateUser(id, body),
-    onSuccess: async () => {
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: Parameters<typeof adminUpdateUser>[1];
+      userName: string;
+    }) => adminUpdateUser(id, body),
+    onSuccess: async (_data, vars) => {
       setEditing(null);
-      setEditPassword("");
-      setMessage("User updated");
+      setEditError(null);
+      setMessage(null);
       setError(null);
+      notifySuccess(`${vars.userName} updated`);
       await invalidateUsers();
     },
-    onError: (err: Error) => {
-      setError(err.message);
-      setMessage(null);
-    },
+    // Keep the failure inside the dialog so the edits are not lost.
+    onError: (err: Error) => setEditError(err.message),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: adminDeleteUser,
-    onSuccess: async () => {
-      setMessage("User deactivated");
+    mutationFn: ({ id }: { id: string; userName: string }) => adminDeleteUser(id),
+    onSuccess: async (_data, vars) => {
+      setMessage(null);
       setError(null);
+      notifySuccess(`${vars.userName} deactivated. Sign-in access has been blocked.`);
       await invalidateUsers();
     },
     onError: (err: Error) => {
-      setError(err.message);
+      notifyError(err.message);
+      setError(null);
+      setMessage(null);
+    },
+  });
+
+  const activateMutation = useMutation({
+    mutationFn: ({ id }: { id: string; userName: string }) => adminUpdateUser(id, { active: true }),
+    onSuccess: async (_data, vars) => {
+      setMessage(null);
+      setError(null);
+      notifySuccess(`${vars.userName} activated. They can sign in again.`);
+      await invalidateUsers();
+    },
+    onError: (err: Error) => {
+      notifyError(err.message);
+      setError(null);
       setMessage(null);
     },
   });
@@ -174,14 +218,13 @@ export function UsersPage() {
       adminUpdateUser(id, { role }),
     onSuccess: async (_data, vars) => {
       setRoleChangeUser(null);
-      setMessage(`Role updated for ${vars.userName} → ${roleLabel(vars.role)}`);
+      setRoleChangeError(null);
       setError(null);
+      notifySuccess(`${vars.userName} is now ${roleLabel(vars.role)}`);
       await invalidateUsers();
     },
-    onError: (err: Error) => {
-      setError(err.message);
-      setMessage(null);
-    },
+    // Keep the failure inside the modal so the admin can retry without reopening.
+    onError: (err: Error) => setRoleChangeError(err.message),
   });
 
   if (!canRoles) {
@@ -195,56 +238,40 @@ export function UsersPage() {
     setProjectFilter("");
   }
 
-  function onCreate(e: FormEvent) {
-    e.preventDefault();
-    const nameErr = validateName(name);
-    if (nameErr) {
-      setError(nameErr);
-      return;
-    }
-    const emailErr = validateEmail(email);
-    if (emailErr) {
-      setError(emailErr);
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters");
-      return;
-    }
-    createMutation.mutate({
-      name: name.trim(),
-      email: email.trim(),
-      password,
-      role,
-      projectIds: createProjectIds,
-    });
+  function onCreateSuccess(user: UserWithTemporaryPassword) {
+    setMessage(null);
+    setError(null);
+    notifySuccess(`${user.name} created successfully`);
+    void invalidateUsers();
   }
 
-  function onSaveEdit(e: FormEvent) {
+  function onSaveEdit(e: FormEvent, access?: EditUserAccess) {
     e.preventDefault();
     if (!editing) return;
     const nameErr = validateName(editing.name);
     if (nameErr) {
-      setError(nameErr);
+      setEditError(nameErr);
       return;
     }
     const emailErr = validateEmail(editing.email);
     if (emailErr) {
-      setError(emailErr);
+      setEditError(emailErr);
       return;
     }
-    if (editPassword && editPassword.length < 8) {
-      setError("New password must be at least 8 characters");
+    if (isSuperAdmin(me) && access && !access.organizationId) {
+      setEditError("Select an organization");
       return;
     }
+    setEditError(null);
     updateMutation.mutate({
       id: editing.id,
+      userName: editing.name.trim(),
       body: {
         name: editing.name.trim(),
         email: editing.email.trim(),
         role: editing.role,
         active: editing.active !== false,
-        ...(editPassword ? { newPassword: editPassword } : {}),
+        ...(access ? { organizationId: access.organizationId, projectIds: access.projectIds } : {}),
       },
     });
   }
@@ -257,7 +284,9 @@ export function UsersPage() {
 
   return (
     <Shell title="Users">
-      <div className="tb-scroll-y flex h-full min-h-0 flex-col gap-3 pb-4">
+      {/* shrink-0: the Shell scroller is a flex column, so without it this block
+          is squeezed to the viewport and taller content risks being clipped. */}
+      <div className="flex min-h-0 shrink-0 flex-col gap-3 pb-4">
         <div className="shrink-0 space-y-3">
           <PageHeader
             description={
@@ -271,14 +300,11 @@ export function UsersPage() {
                   type="button"
                   className="tb-btn-primary text-sm"
                   onClick={() => {
-                    setShowCreate((v) => !v);
+                    setShowCreate(true);
                     setError(null);
-                    if (!showCreate && projectFilter) {
-                      setCreateProjectIds([projectFilter]);
-                    }
                   }}
                 >
-                  {showCreate ? "Close form" : "Create user"}
+                  Create user
                 </button>
               ) : null
             }
@@ -286,72 +312,64 @@ export function UsersPage() {
 
           <FlashAlert error={error} message={message} />
 
-          {canFullUserAdmin && showCreate && (
-            <CreateUserForm
-              name={name}
-              email={email}
-              password={password}
-              role={role}
-              roles={roles}
-              projects={projects}
-              createProjectIds={createProjectIds}
-              busy={createMutation.isPending}
-              onName={setName}
-              onEmail={setEmail}
-              onPassword={setPassword}
-              onRole={setRole}
-              onToggleProject={(id) =>
-                setCreateProjectIds((prev) =>
-                  prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-                )
-              }
-              onSubmit={onCreate}
-            />
-          )}
+          <CreateUserModal
+            open={showCreate && canFullUserAdmin}
+            onClose={() => setShowCreate(false)}
+            roles={roles}
+            projects={projects}
+            organizations={organizations}
+            requireOrganization={isSuperAdmin(me)}
+            initialProjectIds={createProjectDefaults}
+            onCreated={onCreateSuccess}
+          />
 
-          {canFullUserAdmin && editing && (
-            <EditUserForm
+          <ResetPasswordModal
+            user={resetUser}
+            onClose={() => setResetUser(null)}
+            onReset={(u) => {
+              setMessage(`Temporary password generated for ${u.name} — copy it before closing.`);
+              setError(null);
+              void invalidateUsers();
+            }}
+          />
+
+          {canFullUserAdmin && (
+            <EditUserModal
               editing={editing}
               meId={me?.id}
               roles={roles}
-              editPassword={editPassword}
+              projects={projects}
+              organizations={organizations}
+              requireOrganization={isSuperAdmin(me)}
               busy={updateMutation.isPending}
+              error={editError}
               onChange={setEditing}
-              onPassword={setEditPassword}
-              onCancel={() => setEditing(null)}
+              onCancel={() => {
+                setEditing(null);
+                setEditError(null);
+              }}
               onSubmit={onSaveEdit}
             />
           )}
 
-          {roleChangeUser && (
-            <ChangeRoleForm
-              user={roleChangeUser}
-              roles={roles}
-              value={roleChangeValue}
-              busy={changeRoleMutation.isPending}
-              onValue={setRoleChangeValue}
-              onCancel={() => setRoleChangeUser(null)}
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (roleChangeValue === roleChangeUser.role) {
-                  setRoleChangeUser(null);
-                  return;
-                }
-                if (
-                  !window.confirm(
-                    `Change ${roleChangeUser.name}'s role from ${roleLabel(roleChangeUser.role)} to ${roleLabel(roleChangeValue)}?`,
-                  )
-                ) {
-                  return;
-                }
-                changeRoleMutation.mutate({
-                  id: roleChangeUser.id,
-                  role: roleChangeValue,
-                  userName: roleChangeUser.name,
-                });
-              }}
-            />
-          )}
+          <ChangeRoleModal
+            user={roleChangeUser}
+            roles={roles}
+            busy={changeRoleMutation.isPending}
+            error={roleChangeError}
+            onClose={() => {
+              setRoleChangeUser(null);
+              setRoleChangeError(null);
+            }}
+            onSubmit={(role) => {
+              if (!roleChangeUser) return;
+              changeRoleMutation.mutate({
+                id: roleChangeUser.id,
+                role,
+                userName: roleChangeUser.name,
+              });
+            }}
+          />
 
           <UserFiltersBar
             projects={projects}
@@ -410,41 +428,53 @@ export function UsersPage() {
             </div>
           )}
 
+          {!usersQuery.isLoading && filtered.length > 0 && (
+            <div className="tb-user-head">
+              <span className="min-w-0 flex-1">User</span>
+              <span className="tb-user-col-role">Designation</span>
+              <span className="tb-user-col-status">Status</span>
+              <span className="tb-user-col-actions">Actions</span>
+            </div>
+          )}
+
           <div className="divide-y divide-[var(--line)]">
-            {filtered.map((u) => (
-              <div
-                key={u.id}
-                className="flex flex-wrap items-center gap-3 px-4 py-3 sm:flex-nowrap"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-[var(--ink)]">
-                    {u.name}
-                    {u.id === me?.id ? (
-                      <span className="ml-2 text-xs font-medium text-[var(--accent)]">(you)</span>
-                    ) : null}
-                  </p>
-                  <p className="truncate text-xs text-[var(--muted)]">{u.email}</p>
+            {pageItems.map((u) => (
+              <div key={u.id} className="tb-user-row">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <span className="tb-user-avatar" aria-hidden>
+                    {userInitials(u.name)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-[var(--ink)]">
+                      {u.name}
+                      {u.id === me?.id ? (
+                        <span className="ml-2 text-xs font-medium text-[var(--accent)]">(you)</span>
+                      ) : null}
+                    </p>
+                    <p className="truncate text-xs text-[var(--muted)]">{u.email}</p>
+                  </div>
                 </div>
-                <span className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                  {roleLabel(u.role)}
-                </span>
-                <span
-                  className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${
-                    u.active === false
-                      ? "bg-rose-50 text-rose-700"
-                      : "bg-emerald-50 text-emerald-700"
-                  }`}
-                >
-                  {u.active === false ? "Inactive" : "Active"}
-                </span>
-                <div className="flex gap-2">
+                <div className="tb-user-col-role">
+                  <span className={`tb-role-chip ${ROLE_CHIP_CLASS[u.role] ?? ""}`}>
+                    {roleLabel(u.role)}
+                  </span>
+                </div>
+                <div className="tb-user-col-status">
+                  <span
+                    className={`tb-status-pill ${u.active === false ? "is-inactive" : "is-active"}`}
+                  >
+                    <span className="tb-status-dot" aria-hidden />
+                    {u.active === false ? "Inactive" : "Active"}
+                  </span>
+                </div>
+                <div className="tb-user-col-actions">
                   {canChangeUserRole(me, u) && (
                     <button
                       type="button"
                       className="tb-btn-ghost text-xs"
                       onClick={() => {
                         setRoleChangeUser(u);
-                        setRoleChangeValue(roles.includes(u.role) ? u.role : roles[0] || "TESTER");
+                        setRoleChangeError(null);
                         setEditing(null);
                         setShowCreate(false);
                         setError(null);
@@ -454,44 +484,46 @@ export function UsersPage() {
                     </button>
                   )}
                   {canFullUserAdmin && (
-                    <button
-                      type="button"
-                      className="tb-btn-ghost text-xs"
-                      onClick={() => {
+                    <UserActionsMenu
+                      user={u}
+                      canEdit
+                      canResetPassword={
+                        u.id !== me?.id && u.active !== false && canManageRole(me, u.role)
+                      }
+                      canChangeStatus={u.id !== me?.id && canManageRole(me, u.role)}
+                      canDeleteForever={isSuperAdmin(me) && u.id !== me?.id && u.active === false}
+                      busy={
+                        deleteMutation.isPending ||
+                        activateMutation.isPending ||
+                        hardDeleteMutation.isPending
+                      }
+                      onEdit={() => {
                         setEditing(u);
-                        setEditPassword("");
                         setError(null);
                         setShowCreate(false);
                         setRoleChangeUser(null);
                       }}
-                    >
-                      Edit
-                    </button>
-                  )}
-                  {canFullUserAdmin && u.id !== me?.id && u.active !== false && (
-                    <button
-                      type="button"
-                      className="tb-btn-ghost text-xs text-rose-600"
-                      disabled={deleteMutation.isPending}
-                      onClick={() => {
+                      onResetPassword={() => {
+                        setResetUser(u);
+                        setError(null);
+                        setMessage(null);
+                        setShowCreate(false);
+                        setEditing(null);
+                        setRoleChangeUser(null);
+                      }}
+                      onActivate={() => {
+                        activateMutation.mutate({ id: u.id, userName: u.name });
+                      }}
+                      onDeactivate={() => {
                         if (
                           window.confirm(
-                            `Deactivate ${u.name}? They will no longer be able to sign in.`,
+                            `Deactivate ${u.name}? Their existing sessions will stop working and they will no longer be able to sign in.`,
                           )
                         ) {
-                          deleteMutation.mutate(u.id);
+                          deleteMutation.mutate({ id: u.id, userName: u.name });
                         }
                       }}
-                    >
-                      Deactivate
-                    </button>
-                  )}
-                  {isSuperAdmin(me) && u.id !== me?.id && u.active === false && (
-                    <button
-                      type="button"
-                      className="tb-btn-ghost text-xs text-rose-700"
-                      disabled={hardDeleteMutation.isPending}
-                      onClick={() => {
+                      onDeleteForever={() => {
                         if (
                           window.confirm(
                             `Permanently delete ${u.name}? This cannot be undone. Bug history will keep their name as an ID only.`,
@@ -500,14 +532,26 @@ export function UsersPage() {
                           hardDeleteMutation.mutate(u.id);
                         }
                       }}
-                    >
-                      Delete forever
-                    </button>
+                    />
                   )}
                 </div>
               </div>
             ))}
           </div>
+
+          {filtered.length > 0 && (
+            <Pagination
+              page={safePage}
+              pageSize={pageSize}
+              totalItems={filtered.length}
+              startIdx={startIdx}
+              endIdx={endIdx}
+              totalPages={totalPages}
+              itemLabel="users"
+              onPage={setPage}
+              onPageSize={setPageSize}
+            />
+          )}
         </div>
       </div>
     </Shell>

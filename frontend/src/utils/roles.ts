@@ -73,7 +73,7 @@ export function canManageOrgMembers(user: User | null | undefined) {
 export function assignableRoles(actor: User | null | undefined): UserRole[] {
   if (!actor) return [];
   if (actor.role === "SUPERADMIN") {
-    return ["SUPERADMIN", "MANAGER", "DEVELOPER", "TESTER"];
+    return ["MANAGER", "DEVELOPER", "TESTER"];
   }
   if (actor.role === "MANAGER") {
     return ["MANAGER", "DEVELOPER", "TESTER"];

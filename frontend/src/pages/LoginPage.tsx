@@ -5,7 +5,7 @@ import { useAuth } from "../auth";
 import { validateEmail } from "../utils/validation";
 
 export function LoginPage() {
-  const { token, ready, setSession } = useAuth();
+  const { token, user, ready, setSession } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -19,7 +19,10 @@ export function LoginPage() {
       </div>
     );
   }
-  if (token) return <Navigate to="/bugs" replace />;
+  if (token) {
+    if (user?.mustChangePassword) return <Navigate to="/change-password" replace />;
+    return <Navigate to="/bugs" replace />;
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -39,7 +42,7 @@ export function LoginPage() {
     try {
       const result = await login(email.trim(), password);
       setSession(result.token, result.user);
-      navigate("/bugs");
+      navigate(result.user.mustChangePassword ? "/change-password" : "/bugs");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {

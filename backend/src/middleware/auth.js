@@ -1,7 +1,14 @@
 import { query } from "../db.js";
-import { userIdFromToken } from "../services/jwt.js";
+import { verifyToken } from "../services/jwt.js";
 import { forbidden } from "../errors.js";
 import { isAdmin, isSuperAdmin, normalizeRole, canCreateProject, canTransferRoles } from "../roles.js";
+
+/** A token is only good for the password it was minted under. */
+function tokenPredatesPassword(issuedAt, passwordChangedAt) {
+  if (!issuedAt || !passwordChangedAt) return false;
+  const changedSec = Math.floor(new Date(passwordChangedAt).getTime() / 1000);
+  return issuedAt < changedSec;
+}
 
 export async function optionalAuth(req, _res, next) {
   const header = req.headers.authorization;
@@ -9,14 +16,20 @@ export async function optionalAuth(req, _res, next) {
     return next();
   }
   try {
-    const userId = userIdFromToken(header.slice(7));
+    const { userId, issuedAt } = verifyToken(header.slice(7));
     const { rows } = await query(
-      `SELECT id, name, email, password_hash AS "passwordHash", role, active
+      `SELECT id, name, email, password_hash AS "passwordHash", role, active,
+              must_change_password AS "mustChangePassword",
+              password_changed_at AS "passwordChangedAt"
        FROM users WHERE id = $1`,
       [userId],
     );
     const user = rows[0];
-    if (user && user.active !== false) {
+    if (
+      user &&
+      user.active !== false &&
+      !tokenPredatesPassword(issuedAt, user.passwordChangedAt)
+    ) {
       req.user = user;
     }
   } catch {
@@ -25,10 +38,24 @@ export async function optionalAuth(req, _res, next) {
   next();
 }
 
+/**
+ * Routes a user with a pending forced password change may still reach.
+ * Explicit opt-in beats URL matching, which trailing slashes and casing defeat.
+ */
+export function allowPasswordChangePending(req, _res, next) {
+  req.allowPasswordChangePending = true;
+  next();
+}
+
 export async function requireAuth(req, res, next) {
   await optionalAuth(req, res, () => {
     if (!req.user) {
       return res.status(401).json({ message: "Unauthorized" });
+    }
+    if (req.user.mustChangePassword && req.allowPasswordChangePending !== true) {
+      return next(
+        forbidden("You must change your temporary password before continuing"),
+      );
     }
     next();
   });

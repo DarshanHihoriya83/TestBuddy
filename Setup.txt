@@ -83,15 +83,33 @@ Developer  : bob@testbuddy.local
 Tester     : alice@testbuddy.local
 
 Public register always creates TESTER.
-Managers (and SuperAdmin) create other roles from Users page.
+Managers (and SuperAdmin) create Manager, Developer, and Tester users from the Users page.
+SUPERADMIN is a reserved bootstrap role and cannot be created or assigned from the UI/API.
 
 
 Roles cheat-sheet
 -----------------
-- SuperAdmin : organizations, all users, hard-delete users; modules view-only (no add/edit/delete)
-- Manager : create projects under an org (capped by org maxProjects from SuperAdmin, and MAX_PROJECTS_PER_MANAGER); sees all org projects; modules; full bug edit; user CRUD; org members; assign Manager/Dev/Tester; grant project access
+- SuperAdmin : organizations, all users, hard-delete users; modules view-only (no add/edit/delete); creates users with auto-generated temporary passwords
+- Manager : create projects under an org (capped by org maxProjects from SuperAdmin, and MAX_PROJECTS_PER_MANAGER); sees all org projects; modules; full bug edit; user CRUD; org members; assign Manager/Dev/Tester; grant project access; auto-generated temporary passwords for new users
 - Tester : org member; sees only Manager-assigned projects; modules, create bugs (extension), comments, bug status
 - Developer : org member; sees only Manager-assigned projects; comments + bug status only (no bug create / no project create / no modules manage)
+
+Passwords
+---------
+- Admin-created users get an auto-generated 16-char temporary password, shown once in the Create user modal.
+- On first login the user is sent to /change-password and cannot reach any other API until they set their own password.
+- "Reset password" on a user row (Users page, or Settings -> Reset password) generates a new temporary password and re-forces the change.
+- Admins can never type a password for someone else; PUT /api/users/:id rejects newPassword.
+- Policy for user-chosen passwords: 10-128 chars, one lowercase, one uppercase, one number, one symbol, no spaces,
+  no character repeated 3x in a row, not a common password, and not containing the user's name or email.
+- Changing a password (or an admin reset) bumps users.password_changed_at, which revokes every token issued earlier.
+  The change-password response returns a fresh token so the current tab stays signed in.
+- Seeded demo accounts keep the literal password "password" because the seed writes the bcrypt hash directly;
+  the policy only applies when a password is changed through the API.
+- The two responses that carry a plaintext temporary password (POST /api/users and POST /api/users/:id/reset-password)
+  are sent with Cache-Control: no-store.
+- Both are also written to the audit log as one JSON line per event ({"type":"security","event":"password.admin_reset",...})
+  recording actor, target, target role and IP. The password itself is never logged.
 
 Project access: org membership alone is not enough for Tester/Developer — Manager must add them to each project.
 Project create: Manager only (SuperAdmin also allowed); Developer/Tester cannot create. Managers are capped by the organization's project limit (SuperAdmin sets maxProjects) and by MAX_PROJECTS_PER_MANAGER (default 10).
@@ -99,7 +117,7 @@ Project create: Manager only (SuperAdmin also allowed); Developer/Tester cannot 
 
 Useful URLs
 -----------
-Home / extension download : http://localhost:5173/
+Home / extension download : http://localhost:5173/   (SuperAdmin sees the platform Overview here instead)
 Login                     : http://localhost:5173/login
 Register                  : http://localhost:5173/register
 Organizations             : http://localhost:5173/organizations
@@ -130,3 +148,5 @@ Recent updates
 - Role transfer: SuperAdmin / Manager (Admin role removed)
 - Extension: Tester-only login + create-bug validation
 - Users page: Change role UI; SuperAdmin hard-delete after deactivate
+- SuperAdmin landing page is the platform Overview (org/project/user stats, capacity, attention list)
+- Organizations directory: table + card views, search, pagination; list scrolls inside the card

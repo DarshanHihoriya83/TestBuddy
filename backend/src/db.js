@@ -167,6 +167,18 @@ export async function ensureSchema() {
   `);
 
   await query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false
+  `);
+
+  // Tokens issued before this moment are rejected, so a password change or
+  // admin reset kills every session the old password could have opened.
+  await query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  `);
+
+  await query(`
     ALTER TABLE projects
     ADD COLUMN IF NOT EXISTS description VARCHAR(4000)
   `);

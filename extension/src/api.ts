@@ -60,6 +60,11 @@ export function assertExtensionTester(user: User | null | undefined): User {
       "Extension access is for Tester accounts only. Sign in with a Tester role.",
     );
   }
+  if (user.mustChangePassword) {
+    throw new Error(
+      "Change your temporary password on the TestBuddy dashboard before using the extension.",
+    );
+  }
   return user;
 }
 

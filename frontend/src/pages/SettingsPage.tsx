@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addProjectMember,
-  adminResetPassword,
   fetchAdminUsers,
   fetchMe,
   fetchProjectMembers,
@@ -18,6 +17,12 @@ import { PageHeader } from "../components/PageHeader";
 import { ProjectMembersPanel } from "../components/project/ProjectMembersPanel";
 import { QueryStatus } from "../components/QueryStatus";
 import { Shell } from "../components/Shell";
+import { ResetPasswordModal } from "../components/users/ResetPasswordModal";
+import {
+  IconRefresh,
+  PasswordField,
+  PasswordStrengthMeter,
+} from "../components/users/UserPasswordUi";
 import { queryKeys } from "../queryKeys";
 import type { User } from "../types";
 import {
@@ -28,7 +33,7 @@ import {
 } from "../utils/roles";
 import {
   validateName,
-  validateNewPassword,
+  validatePasswordStrength,
   validateRequiredPasswordChange,
 } from "../utils/validation";
 
@@ -213,12 +218,20 @@ function ChangePasswordSection({
   user: User | null;
   updateUser: (u: User) => void;
 }) {
+  const { setSession } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const context = useMemo(
+    () => ({ name: user?.name, email: user?.email }),
+    [user?.name, user?.email],
+  );
+  const strengthError = newPassword ? validatePasswordStrength(newPassword, context) : null;
+  const mismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
 
   async function onSave(e: FormEvent) {
     e.preventDefault();
@@ -230,6 +243,7 @@ function ChangePasswordSection({
         currentPassword,
         newPassword,
         confirmPassword,
+        context,
       );
       if (passwordErr) throw new Error(passwordErr);
       const updated = await updateProfile({
@@ -237,11 +251,13 @@ function ChangePasswordSection({
         currentPassword,
         newPassword,
       });
-      updateUser(updated);
+      // Old tokens are revoked on password change — adopt the reissued one.
+      if (updated.token) setSession(updated.token, updated);
+      else updateUser(updated);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      setMessage("Password updated");
+      setMessage("Password updated — other sessions have been signed out");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Update failed");
     } finally {
@@ -250,50 +266,45 @@ function ChangePasswordSection({
   }
 
   return (
-    <form onSubmit={onSave} className="tb-card max-w-lg space-y-4 p-5">
+    <form onSubmit={onSave} noValidate className="tb-card max-w-lg space-y-4 p-5">
       <div>
         <h2 className="text-lg font-bold text-[var(--ink)]">Change password</h2>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          Enter your current password, then choose a new one (min 8 characters).
+          Enter your current password, then choose a new one that meets the policy below.
         </p>
       </div>
-      <label className="tb-label">
-        Current password
-        <input
-          type="password"
-          className="tb-input"
-          value={currentPassword}
-          onChange={(e) => setCurrentPassword(e.target.value)}
-          autoComplete="current-password"
-          required
-        />
-      </label>
-      <label className="tb-label">
-        New password
-        <input
-          type="password"
-          className="tb-input"
-          value={newPassword}
-          onChange={(e) => setNewPassword(e.target.value)}
-          autoComplete="new-password"
-          minLength={8}
-          required
-        />
-      </label>
-      <label className="tb-label">
-        Confirm new password
-        <input
-          type="password"
-          className="tb-input"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-          autoComplete="new-password"
-          minLength={8}
-          required
-        />
-      </label>
+      <PasswordField
+        label="Current password"
+        required
+        value={currentPassword}
+        onChange={setCurrentPassword}
+        autoComplete="current-password"
+      />
+      <PasswordField
+        label="New password"
+        required
+        icon={<IconRefresh />}
+        value={newPassword}
+        onChange={setNewPassword}
+        autoComplete="new-password"
+        error={strengthError}
+      />
+      <PasswordField
+        label="Confirm new password"
+        required
+        icon={<IconRefresh />}
+        value={confirmPassword}
+        onChange={setConfirmPassword}
+        autoComplete="new-password"
+        error={mismatch ? "New passwords do not match" : null}
+      />
+      <PasswordStrengthMeter password={newPassword} context={context} />
       <FlashAlert error={error} message={message} className="" />
-      <button type="submit" disabled={busy} className="tb-btn-primary">
+      <button
+        type="submit"
+        disabled={busy || !currentPassword || !!strengthError || mismatch || !confirmPassword}
+        className="tb-btn-primary"
+      >
         {busy ? "Updating…" : "Update password"}
       </button>
     </form>
@@ -456,12 +467,8 @@ function MembersSection({
 
 function ResetPasswordSection({ me }: { me: User | null }) {
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [target, setTarget] = useState<User | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const usersQuery = useQuery({
     queryKey: queryKeys.usersAdmin(),
@@ -483,41 +490,14 @@ function ResetPasswordSection({ me }: { me: User | null }) {
     });
   }, [usersQuery.data, me, search]);
 
-  const selected = targets.find((u) => u.id === selectedId) ?? null;
-
-  useEffect(() => {
-    if (selectedId && !targets.some((u) => u.id === selectedId)) setSelectedId("");
-  }, [targets, selectedId]);
-
-  async function onReset(e: FormEvent) {
-    e.preventDefault();
-    if (!selected) return;
-    setBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      const pwErr = validateNewPassword(newPassword, confirmPassword);
-      if (pwErr) throw new Error(pwErr);
-      await adminResetPassword(selected.id, newPassword);
-      setNewPassword("");
-      setConfirmPassword("");
-      setMessage(`Password reset for ${selected.name}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Reset failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 rounded-2xl border border-amber-200/80 bg-gradient-to-br from-amber-50 to-orange-50/80 p-5">
       <div>
-        <h2 className="text-lg font-bold text-[var(--ink)]">Reset password</h2>
+        <h2 className="text-lg font-bold text-[var(--ink)]">Admin reset password</h2>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          Set a temporary password for users you manage
-          {me?.role === "MANAGER"
-            ? " (Manager, Developer, Tester)."
-            : " (any role)."}
+          Generate a temporary password for users you manage
+          {me?.role === "MANAGER" ? " (Manager, Developer, Tester)." : " (any role)."} They must
+          change it on next login, and all their existing sessions are signed out.
         </p>
       </div>
 
@@ -538,70 +518,44 @@ function ResetPasswordSection({ me }: { me: User | null }) {
         />
       </label>
 
-      <div className="tb-card max-h-56 overflow-y-auto divide-y divide-[var(--line)]">
+      <FlashAlert error={null} message={message} className="" />
+
+      <div className="tb-card max-h-64 overflow-y-auto divide-y divide-[var(--line)]">
         {targets.length === 0 && !usersQuery.isLoading ? (
           <p className="p-4 text-sm text-[var(--muted)]">No manageable users found.</p>
         ) : (
           targets.map((u) => (
-            <button
+            <div
               key={u.id}
-              type="button"
-              className={`flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-sm ${
-                selectedId === u.id ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--input-bg)]"
-              }`}
-              onClick={() => {
-                setSelectedId(u.id);
-                setError(null);
-                setMessage(null);
-              }}
+              className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm"
             >
-              <span>
+              <span className="min-w-0 truncate">
                 <span className="font-semibold text-[var(--ink)]">{u.name}</span>
                 <span className="ml-2 text-[var(--muted)]">{u.email}</span>
               </span>
-              <span className="shrink-0 text-xs font-medium text-[var(--muted)]">
-                {roleLabel(u.role)}
+              <span className="flex shrink-0 items-center gap-3">
+                <span className="text-xs font-medium text-[var(--muted)]">{roleLabel(u.role)}</span>
+                <button
+                  type="button"
+                  className="tb-btn-ghost text-xs"
+                  onClick={() => {
+                    setTarget(u);
+                    setMessage(null);
+                  }}
+                >
+                  Reset password
+                </button>
               </span>
-            </button>
+            </div>
           ))
         )}
       </div>
 
-      {selected && (
-        <form onSubmit={onReset} className="tb-card max-w-lg space-y-4 p-5">
-          <p className="text-sm text-[var(--ink)]">
-            Reset password for <strong>{selected.name}</strong> ({roleLabel(selected.role)})
-          </p>
-          <label className="tb-label">
-            New temporary password
-            <input
-              type="password"
-              className="tb-input"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              autoComplete="new-password"
-              minLength={8}
-              required
-            />
-          </label>
-          <label className="tb-label">
-            Confirm password
-            <input
-              type="password"
-              className="tb-input"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              autoComplete="new-password"
-              minLength={8}
-              required
-            />
-          </label>
-          <FlashAlert error={error} message={message} className="" />
-          <button type="submit" disabled={busy} className="tb-btn-primary">
-            {busy ? "Resetting…" : "Reset password"}
-          </button>
-        </form>
-      )}
+      <ResetPasswordModal
+        user={target}
+        onClose={() => setTarget(null)}
+        onReset={(u) => setMessage(`Temporary password generated for ${u.name}.`)}
+      />
     </div>
   );
 }

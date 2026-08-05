@@ -60,7 +60,10 @@ export function canManageRole(actor, targetRole) {
 }
 
 export function canAssignRole(actor, newRole) {
-  return canManageRole(actor, newRole);
+  const role = normalizeRole(newRole);
+  // SUPERADMIN is a reserved bootstrap role and cannot be created or assigned
+  // through the user-management API.
+  return role !== "SUPERADMIN" && canManageRole(actor, role);
 }
 
 export function canCreateOrganization(user) {

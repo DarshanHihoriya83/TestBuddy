@@ -1,6 +1,6 @@
 import { Router } from "express";
 import * as app from "../services/appService.js";
-import { optionalAuth, requireAuth } from "../middleware/auth.js";
+import { allowPasswordChangePending, optionalAuth, requireAuth } from "../middleware/auth.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 
 const router = Router();
@@ -52,12 +52,24 @@ router.get("/auth/me", optionalAuth, async (req, res, next) => {
   }
 });
 
-router.put("/auth/profile", requireAuth, async (req, res, next) => {
-  try {
-    res.json(await app.updateProfile(req.user, req.body));
-  } catch (err) {
-    next(err);
-  }
-});
+router.put(
+  "/auth/profile",
+  allowPasswordChangePending,
+  requireAuth,
+  // Keyed per account, not per IP — several users can share one office IP,
+  // and the point is to stop guessing at one account's currentPassword.
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 15,
+    keyFn: (req) => `profile:${req.user?.id || req.ip}`,
+  }),
+  async (req, res, next) => {
+    try {
+      res.json(await app.updateProfile(req.user, req.body));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 export default router;

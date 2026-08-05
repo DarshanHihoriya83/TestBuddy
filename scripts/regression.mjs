@@ -58,7 +58,26 @@ async function api(path, init = {}) {
   return { res, json, text };
 }
 
-async function loginAs(email, password = "password") {
+/** Seeded accounts keep their bcrypt-seeded password; changes are tracked here. */
+const SEED_PASSWORD = "password";
+const currentPasswords = new Map();
+
+function passwordFor(email) {
+  return currentPasswords.get(String(email).toLowerCase()) ?? SEED_PASSWORD;
+}
+
+function rememberPassword(email, password) {
+  currentPasswords.set(String(email).toLowerCase(), password);
+}
+
+let strongPasswordCounter = 0;
+/** Satisfies the password policy: length, all four classes, nothing banned. */
+function strongPassword() {
+  strongPasswordCounter += 1;
+  return `Qx7!vRe-${strongPasswordCounter}g`;
+}
+
+async function loginAs(email, password = passwordFor(email)) {
   const login = await api("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
@@ -69,6 +88,40 @@ async function loginAs(email, password = "password") {
   token = login.json.token;
   userId = login.json.user.id;
   return login.json.user;
+}
+
+/** After admin create/reset: log in with temp password and set a permanent one. */
+async function adoptPermanentPassword(
+  email,
+  temporaryPassword,
+  permanentPassword = strongPassword(),
+  name,
+) {
+  const user = await loginAs(email, temporaryPassword);
+  if (!user.mustChangePassword) {
+    throw new Error(`expected mustChangePassword for ${email}`);
+  }
+  const profile = await api("/api/auth/profile", {
+    method: "PUT",
+    body: JSON.stringify({
+      name: name || user.name || "User",
+      currentPassword: temporaryPassword,
+      newPassword: permanentPassword,
+    }),
+  });
+  if (!profile.res.ok) {
+    throw new Error(`adopt password failed for ${email}: ${profile.text}`);
+  }
+  if (profile.json?.mustChangePassword) {
+    throw new Error(`mustChangePassword still set for ${email}`);
+  }
+  if (!profile.json?.token) {
+    throw new Error(`expected a reissued token for ${email}`);
+  }
+  // Old token is revoked by the password change — keep using the fresh one.
+  token = profile.json.token;
+  rememberPassword(email, permanentPassword);
+  return profile.json;
 }
 
 async function testHealth() {
@@ -87,7 +140,7 @@ async function testAuth() {
 
   const login = await api("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email: "alice@testbuddy.local", password: "password" }),
+    body: JSON.stringify({ email: "alice@testbuddy.local", password: passwordFor("alice@testbuddy.local") }),
   });
   if (!login.res.ok || !login.json?.token) {
     fail("POST /api/auth/login", login.text);
@@ -102,12 +155,13 @@ async function testAuth() {
   else fail("GET /api/auth/me", me.text);
 
   const email = `regression-${Date.now()}@testbuddy.local`;
+  const registerPassword = strongPassword();
   const reg = await api("/api/auth/register", {
     method: "POST",
     body: JSON.stringify({
       name: "Regression User",
       email,
-      password: "password123",
+      password: registerPassword,
       role: "MANAGER",
     }),
   });
@@ -126,10 +180,273 @@ async function testAuth() {
 
   const dup = await api("/api/auth/register", {
     method: "POST",
-    body: JSON.stringify({ name: "Dup", email, password: "password123" }),
+    body: JSON.stringify({ name: "Dup", email, password: registerPassword }),
   });
   if (dup.res.status === 409) pass("POST /api/auth/register conflict");
   else fail("POST /api/auth/register conflict", `status ${dup.res.status}`);
+
+  // Auto-generated temp password + must-change gate
+  await loginAs("superadmin@testbuddy.local");
+  const tmpEmail = `tmp.user.${Date.now()}@testbuddy.local`;
+  const created = await api("/api/users", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Temp Password User",
+      email: tmpEmail,
+      role: "TESTER",
+    }),
+  });
+  if (
+    created.res.status === 201 &&
+    created.json?.temporaryPassword &&
+    created.json?.mustChangePassword
+  ) {
+    pass("Admin create user returns temporaryPassword");
+    await loginAs(tmpEmail, created.json.temporaryPassword);
+    const staleToken = token;
+    const blocked = await api("/api/projects");
+    if (blocked.res.status === 403) pass("mustChangePassword blocks app API");
+    else fail("mustChangePassword blocks app API", `status ${blocked.res.status}`);
+
+    const weak = await api("/api/auth/profile", {
+      method: "PUT",
+      body: JSON.stringify({
+        name: "Temp Password User",
+        currentPassword: created.json.temporaryPassword,
+        newPassword: "password",
+      }),
+    });
+    if (weak.res.status === 400) pass("weak password rejected by policy");
+    else fail("weak password rejected by policy", `status ${weak.res.status}`);
+
+    await adoptPermanentPassword(
+      tmpEmail,
+      created.json.temporaryPassword,
+      undefined,
+      "Temp Password User",
+    );
+    const allowed = await api("/api/projects");
+    if (allowed.res.ok) pass("after password change API allowed");
+    else fail("after password change API allowed", allowed.text);
+
+    const freshToken = token;
+    token = staleToken;
+    const revoked = await api("/api/auth/me");
+    if (revoked.res.status === 401) pass("token issued before password change is revoked");
+    else fail("token issued before password change is revoked", `status ${revoked.res.status}`);
+    token = freshToken;
+
+    await loginAs("superadmin@testbuddy.local");
+    const directSet = await api(`/api/users/${created.json.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ newPassword: "Str0ng!Direct-1" }),
+    });
+    if (directSet.res.status === 400) pass("admin cannot set a password directly");
+    else fail("admin cannot set a password directly", `status ${directSet.res.status}`);
+
+    // Deactivate/activate lifecycle: deactivation must block both new logins and
+    // already-issued sessions. Reactivation permits a fresh login but must not
+    // revive the token that existed before the account was disabled.
+    await loginAs(tmpEmail);
+    const tokenBeforeDeactivation = token;
+    await loginAs("superadmin@testbuddy.local");
+    const deactivated = await api(`/api/users/${created.json.id}`, {
+      method: "DELETE",
+    });
+    if (deactivated.res.status === 204) pass("Admin deactivates user");
+    else fail("Admin deactivates user", deactivated.text || `status ${deactivated.res.status}`);
+
+    token = tokenBeforeDeactivation;
+    const blockedSession = await api("/api/auth/me");
+    if (blockedSession.res.status === 401) pass("Deactivated user's existing session is blocked");
+    else fail("Deactivated user's existing session is blocked", `status ${blockedSession.res.status}`);
+
+    token = "";
+    const blockedLogin = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: tmpEmail, password: passwordFor(tmpEmail) }),
+    });
+    if (blockedLogin.res.status === 403) pass("Deactivated user cannot log in");
+    else fail("Deactivated user cannot log in", `status ${blockedLogin.res.status}`);
+
+    await loginAs("superadmin@testbuddy.local");
+    const reactivated = await api(`/api/users/${created.json.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ active: true }),
+    });
+    if (reactivated.res.ok && reactivated.json?.active === true) pass("Admin reactivates user");
+    else fail("Admin reactivates user", reactivated.text);
+
+    token = tokenBeforeDeactivation;
+    const oldSessionStillRevoked = await api("/api/auth/me");
+    if (oldSessionStillRevoked.res.status === 401) {
+      pass("Reactivation does not revive old sessions");
+    } else {
+      fail("Reactivation does not revive old sessions", `status ${oldSessionStillRevoked.res.status}`);
+    }
+
+    token = "";
+    const loginAfterReactivation = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: tmpEmail, password: passwordFor(tmpEmail) }),
+    });
+    if (loginAfterReactivation.res.ok && loginAfterReactivation.json?.token) {
+      pass("Reactivated user can log in with a fresh session");
+    } else {
+      fail("Reactivated user can log in with a fresh session", loginAfterReactivation.text);
+    }
+
+    await loginAs("superadmin@testbuddy.local");
+    await api(`/api/users/${created.json.id}`, { method: "DELETE" });
+    await api(`/api/users/${created.json.id}/permanent`, { method: "DELETE" });
+  } else {
+    fail("Admin create user returns temporaryPassword", created.text);
+  }
+
+  // Create + project assignment must enroll org membership first, otherwise
+  // addProjectMember used to fail with "User must belong to the organization".
+  await loginAs("superadmin@testbuddy.local");
+  const projects = await api("/api/projects");
+  const demoProject = (projects.json || []).find((p) => p.organizationId) || projects.json?.[0];
+  if (demoProject?.id) {
+    const assignedEmail = `assigned.user.${Date.now()}@testbuddy.local`;
+    const assigned = await api("/api/users", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Assigned Tester",
+        email: assignedEmail,
+        role: "TESTER",
+        projectIds: [demoProject.id],
+      }),
+    });
+    if (assigned.res.status === 201 && assigned.json?.id && assigned.json?.temporaryPassword) {
+      pass("Admin create user with projectIds");
+      const members = await api(`/api/projects/${demoProject.id}/members`);
+      const onProject = (members.json || []).some((u) => u.id === assigned.json.id);
+      if (onProject) pass("Created user is a project member");
+      else fail("Created user is a project member", members.text);
+
+      const directory = await api("/api/users/admin");
+      const inDirectory = (directory.json || []).some((u) => u.id === assigned.json.id);
+      if (inDirectory) pass("Created user appears in admin directory");
+      else fail("Created user appears in admin directory", directory.text);
+
+      await api(`/api/users/${assigned.json.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ active: false }),
+      });
+      await api(`/api/users/${assigned.json.id}/permanent`, { method: "DELETE" });
+    } else {
+      fail("Admin create user with projectIds", assigned.text);
+    }
+  } else {
+    fail("Admin create user with projectIds", "no project available");
+  }
+
+  // SuperAdmin picks an organization explicitly: the new user must join it even
+  // when no project is assigned, and a bogus org id must be refused.
+  const orgList = await api("/api/organizations");
+  const targetOrg = orgList.json?.[0];
+  if (targetOrg?.id) {
+    const orgUserEmail = `org.user.${Date.now()}@testbuddy.local`;
+    const orgUser = await api("/api/users", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Org Only Tester",
+        email: orgUserEmail,
+        role: "TESTER",
+        organizationId: targetOrg.id,
+      }),
+    });
+    if (orgUser.res.status === 201 && orgUser.json?.id) {
+      pass("Admin create user with organizationId");
+      const orgMembers = await api(`/api/organizations/${targetOrg.id}/members`);
+      if ((orgMembers.json || []).some((u) => u.id === orgUser.json.id)) {
+        pass("Created user joins the selected organization");
+      } else {
+        fail("Created user joins the selected organization", orgMembers.text);
+      }
+      await api(`/api/users/${orgUser.json.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ active: false }),
+      });
+      await api(`/api/users/${orgUser.json.id}/permanent`, { method: "DELETE" });
+    } else {
+      fail("Admin create user with organizationId", orgUser.text);
+    }
+
+    const badOrg = await api("/api/users", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Bad Org Tester",
+        email: `bad.org.${Date.now()}@testbuddy.local`,
+        role: "TESTER",
+        organizationId: "00000000-0000-0000-0000-000000000000",
+      }),
+    });
+    if (badOrg.res.status === 400) pass("Unknown organization is rejected");
+    else fail("Unknown organization is rejected", `status ${badOrg.res.status}`);
+  } else {
+    fail("Admin create user with organizationId", "no organization available");
+  }
+
+  // SuperAdmin Edit can re-point org access and sync that org's project memberships.
+  if (targetOrg?.id) {
+    const editEmail = `edit.access.${Date.now()}@testbuddy.local`;
+    const editUser = await api("/api/users", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Edit Access Tester",
+        email: editEmail,
+        role: "TESTER",
+        organizationId: targetOrg.id,
+      }),
+    });
+    if (editUser.res.status === 201 && editUser.json?.id) {
+      const membershipsBefore = await api(`/api/users/${editUser.json.id}/memberships`);
+      if (
+        membershipsBefore.res.ok &&
+        (membershipsBefore.json?.organizationIds || []).includes(targetOrg.id)
+      ) {
+        pass("GET /api/users/:id/memberships");
+      } else {
+        fail("GET /api/users/:id/memberships", membershipsBefore.text);
+      }
+
+      const demoProjects = (await api("/api/projects")).json || [];
+      const orgProjects = demoProjects.filter((p) => p.organizationId === targetOrg.id);
+      const pick = orgProjects.slice(0, 2).map((p) => p.id);
+      const updated = await api(`/api/users/${editUser.json.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          name: "Edit Access Tester",
+          email: editEmail,
+          role: "TESTER",
+          active: true,
+          organizationId: targetOrg.id,
+          projectIds: pick,
+        }),
+      });
+      if (updated.res.ok) pass("Admin update user with organizationId + projectIds");
+      else fail("Admin update user with organizationId + projectIds", updated.text);
+
+      const membershipsAfter = await api(`/api/users/${editUser.json.id}/memberships`);
+      const afterProjects = membershipsAfter.json?.projectIds || [];
+      const synced = pick.every((id) => afterProjects.includes(id));
+      if (synced) pass("Edit syncs project memberships for the selected organization");
+      else fail("Edit syncs project memberships for the selected organization", membershipsAfter.text);
+
+      await api(`/api/users/${editUser.json.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ active: false }),
+      });
+      await api(`/api/users/${editUser.json.id}/permanent`, { method: "DELETE" });
+    } else {
+      fail("Admin update user with organizationId + projectIds", editUser.text);
+    }
+  }
+
+  await loginAs("alice@testbuddy.local");
 }
 
 async function testCatalog() {
@@ -356,7 +673,7 @@ async function testOrgRbac() {
 
     const carolLoginForLimit = await api("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email: "carol@testbuddy.local", password: "password" }),
+      body: JSON.stringify({ email: "carol@testbuddy.local", password: passwordFor("carol@testbuddy.local") }),
     });
     const carolLimitId = carolLoginForLimit.json?.user?.id;
     if (carolLimitId) {
@@ -463,7 +780,7 @@ async function testOrgRbac() {
   await loginAs("superadmin@testbuddy.local");
   const carolLogin = await api("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email: "carol@testbuddy.local", password: "password" }),
+    body: JSON.stringify({ email: "carol@testbuddy.local", password: passwordFor("carol@testbuddy.local") }),
   });
   const carolId = carolLogin.json?.user?.id;
   if (regOrgId && carolId) {
@@ -492,13 +809,17 @@ async function testOrgRbac() {
     body: JSON.stringify({
       name: "Outsider Manager",
       email: outsiderEmail,
-      password: "password",
       role: "MANAGER",
     }),
   });
-  if (outsider.res.status === 201 && outsider.json?.id) {
+  if (outsider.res.status === 201 && outsider.json?.id && outsider.json?.temporaryPassword) {
     pass("POST /api/users create outsider Manager");
-    await loginAs(outsiderEmail);
+    await adoptPermanentPassword(
+      outsiderEmail,
+      outsider.json.temporaryPassword,
+      undefined,
+      "Outsider Manager",
+    );
     if (mgrProjId) {
       const stealUpdate = await api(`/api/projects/${mgrProjId}`, {
         method: "PUT",
@@ -525,7 +846,7 @@ async function testOrgRbac() {
   await loginAs("carol@testbuddy.local");
   const bobLoginForOrg = await api("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email: "bob@testbuddy.local", password: "password" }),
+    body: JSON.stringify({ email: "bob@testbuddy.local", password: passwordFor("bob@testbuddy.local") }),
   });
   const bobOrgId = bobLoginForOrg.json?.user?.id;
   if (regOrgId && bobOrgId) {
@@ -591,7 +912,7 @@ async function testOrgRbac() {
   await loginAs("carol@testbuddy.local");
   const aliceLoginVis = await api("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email: "alice@testbuddy.local", password: "password" }),
+    body: JSON.stringify({ email: "alice@testbuddy.local", password: passwordFor("alice@testbuddy.local") }),
   });
   const aliceIdForVis = aliceLoginVis.json?.user?.id;
   if (aliceIdForVis && mgrProjId) {
@@ -757,7 +1078,7 @@ async function testOrgRbac() {
     await loginAs("carol@testbuddy.local");
     const bobLogin = await api("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email: "bob@testbuddy.local", password: "password" }),
+      body: JSON.stringify({ email: "bob@testbuddy.local", password: passwordFor("bob@testbuddy.local") }),
     });
     const bobUserId = bobLogin.json?.user?.id;
     if (bobUserId) {
@@ -856,23 +1177,62 @@ async function testRoleTransfer() {
   if (toSA.res.status === 403) pass("Manager cannot assign SUPERADMIN");
   else fail("Manager cannot assign SUPERADMIN", `status ${toSA.res.status}`);
 
-  // Reset password RBAC
-  const mgrResetTester = await api(`/api/users/${aliceId}/reset-password`, {
+  // Reset password RBAC (auto-generated temporary password).
+  // Uses a disposable tester so seeded demo logins keep their known password.
+  const resetTargetEmail = `reset.target.${Date.now()}@testbuddy.local`;
+  const resetTarget = await api("/api/users", {
     method: "POST",
-    body: JSON.stringify({ newPassword: "password" }),
+    body: JSON.stringify({
+      name: "Reset Target",
+      email: resetTargetEmail,
+      role: "TESTER",
+    }),
   });
-  if (mgrResetTester.res.ok) pass("Manager reset Tester password");
-  else fail("Manager reset Tester password", mgrResetTester.text);
+  if (resetTarget.res.status === 201 && resetTarget.json?.id) {
+    const mgrResetTester = await api(`/api/users/${resetTarget.json.id}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    if (mgrResetTester.res.ok && mgrResetTester.json?.temporaryPassword) {
+      pass("Manager reset Tester password");
+      await adoptPermanentPassword(
+        resetTargetEmail,
+        mgrResetTester.json.temporaryPassword,
+        undefined,
+        "Reset Target",
+      );
+      await testerSelfPasswordChange(resetTargetEmail, "Reset Target");
+    } else fail("Manager reset Tester password", mgrResetTester.text);
+
+    await loginAs("carol@testbuddy.local");
+    await api(`/api/users/${resetTarget.json.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ active: false }),
+    });
+  } else {
+    fail("Manager reset Tester password", resetTarget.text);
+    await loginAs("carol@testbuddy.local");
+  }
+
+  // Inactive users cannot be handed a fresh temporary password
+  const inactiveReset = resetTarget.json?.id
+    ? await api(`/api/users/${resetTarget.json.id}/reset-password`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      })
+    : null;
+  if (inactiveReset?.res.status === 400) pass("reset rejected for deactivated user");
+  else fail("reset rejected for deactivated user", `status ${inactiveReset?.res.status}`);
 
   const saLogin = await api("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email: "superadmin@testbuddy.local", password: "password" }),
+    body: JSON.stringify({ email: "superadmin@testbuddy.local", password: passwordFor("superadmin@testbuddy.local") }),
   });
   const saId = saLogin.json?.user?.id;
   if (saId) {
     const mgrResetSA = await api(`/api/users/${saId}/reset-password`, {
       method: "POST",
-      body: JSON.stringify({ newPassword: "password123" }),
+      body: JSON.stringify({}),
     });
     if (mgrResetSA.res.status === 403) pass("Manager forbidden reset SuperAdmin password");
     else fail("Manager forbidden reset SuperAdmin password", `status ${mgrResetSA.res.status}`);
@@ -886,17 +1246,17 @@ async function testRoleTransfer() {
     body: JSON.stringify({
       name: "Peer Manager",
       email: peerEmail,
-      password: "password",
       role: "MANAGER",
     }),
   });
-  if (peer.res.status === 201 && peer.json?.id) {
+  if (peer.res.status === 201 && peer.json?.id && peer.json?.temporaryPassword) {
     const mgrResetPeer = await api(`/api/users/${peer.json.id}/reset-password`, {
       method: "POST",
-      body: JSON.stringify({ newPassword: "password" }),
+      body: JSON.stringify({}),
     });
-    if (mgrResetPeer.res.ok) pass("Manager reset peer Manager password");
-    else fail("Manager reset peer Manager password", mgrResetPeer.text);
+    if (mgrResetPeer.res.ok && mgrResetPeer.json?.temporaryPassword) {
+      pass("Manager reset peer Manager password");
+    } else fail("Manager reset peer Manager password", mgrResetPeer.text);
     await loginAs("superadmin@testbuddy.local");
     await api(`/api/users/${peer.json.id}`, {
       method: "PUT",
@@ -910,7 +1270,7 @@ async function testRoleTransfer() {
 
   const carolLogin = await api("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email: "carol@testbuddy.local", password: "password" }),
+    body: JSON.stringify({ email: "carol@testbuddy.local", password: passwordFor("carol@testbuddy.local") }),
   });
   const carolId = carolLogin.json?.user?.id;
 
@@ -918,7 +1278,7 @@ async function testRoleTransfer() {
   if (carolId) {
     const testerReset = await api(`/api/users/${carolId}/reset-password`, {
       method: "POST",
-      body: JSON.stringify({ newPassword: "password123" }),
+      body: JSON.stringify({}),
     });
     if (testerReset.res.status === 403) pass("Tester forbidden reset password");
     else fail("Tester forbidden reset password", `status ${testerReset.res.status}`);
@@ -926,16 +1286,45 @@ async function testRoleTransfer() {
     fail("Tester forbidden reset password", "no carol id");
   }
 
+}
+
+/** Self-service password change, run against a disposable account. */
+async function testerSelfPasswordChange(email, name) {
+  await loginAs(email);
+  const rotatedPw = strongPassword();
   const selfPw = await api("/api/auth/profile", {
     method: "PUT",
     body: JSON.stringify({
-      name: "Alice Tester",
-      currentPassword: "password",
-      newPassword: "password",
+      name,
+      currentPassword: passwordFor(email),
+      newPassword: rotatedPw,
     }),
   });
-  if (selfPw.res.ok) pass("Tester change own password via profile");
-  else fail("Tester change own password via profile", selfPw.text);
+  if (!selfPw.res.ok || selfPw.json?.mustChangePassword !== false || !selfPw.json?.token) {
+    fail("Tester change own password via profile", selfPw.text);
+    return;
+  }
+  token = selfPw.json.token;
+  rememberPassword(email, rotatedPw);
+  pass("Tester change own password via profile");
+
+  const reuse = await api("/api/auth/profile", {
+    method: "PUT",
+    body: JSON.stringify({ name, currentPassword: rotatedPw, newPassword: rotatedPw }),
+  });
+  if (reuse.res.status === 400) pass("reusing the current password is rejected");
+  else fail("reusing the current password is rejected", `status ${reuse.res.status}`);
+
+  const wrongCurrent = await api("/api/auth/profile", {
+    method: "PUT",
+    body: JSON.stringify({
+      name,
+      currentPassword: `${rotatedPw}x`,
+      newPassword: strongPassword(),
+    }),
+  });
+  if (wrongCurrent.res.status === 400) pass("wrong current password rejected");
+  else fail("wrong current password rejected", `status ${wrongCurrent.res.status}`);
 }
 
 async function testBugs() {

@@ -6,15 +6,13 @@ export const queryKeys = {
   me: ["me"] as const,
   users: (projectId?: string) =>
     projectId ? (["users", projectId] as const) : (["users"] as const),
-  usersAdmin: (projectId?: string) =>
-    ["users-admin", projectId || "all"] as const,
+  usersAdmin: (projectId?: string) => ["users-admin", projectId || "all"] as const,
+  userMemberships: (id: string) => ["user-memberships", id] as const,
   organizations: ["organizations"] as const,
   organization: (id: string) => ["organization", id] as const,
   organizationMembers: (id: string) => ["organization-members", id] as const,
   projects: (organizationId?: string) =>
-    organizationId
-      ? (["projects", { organizationId }] as const)
-      : (["projects"] as const),
+    organizationId ? (["projects", { organizationId }] as const) : (["projects"] as const),
   projectQuota: ["project-quota"] as const,
   project: (id: string) => ["project", id] as const,
   projectMembers: (id: string) => ["project-members", id] as const,
