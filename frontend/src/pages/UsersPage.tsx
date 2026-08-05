@@ -257,253 +257,257 @@ export function UsersPage() {
 
   return (
     <Shell title="Users">
-      <PageHeader
-        description={
-          canFullUserAdmin
-            ? "Create users, change roles, and manage account status."
-            : "Browse users in your organizations."
-        }
-        actions={
-          canFullUserAdmin ? (
-            <button
-              type="button"
-              className="tb-btn-primary text-sm"
-              onClick={() => {
-                setShowCreate((v) => !v);
-                setError(null);
-                if (!showCreate && projectFilter) {
-                  setCreateProjectIds([projectFilter]);
+      <div className="tb-scroll-y flex h-full min-h-0 flex-col gap-3 pb-4">
+        <div className="shrink-0 space-y-3">
+          <PageHeader
+            description={
+              canFullUserAdmin
+                ? "Create users, change roles, and manage account status."
+                : "Browse users in your organizations."
+            }
+            actions={
+              canFullUserAdmin ? (
+                <button
+                  type="button"
+                  className="tb-btn-primary text-sm"
+                  onClick={() => {
+                    setShowCreate((v) => !v);
+                    setError(null);
+                    if (!showCreate && projectFilter) {
+                      setCreateProjectIds([projectFilter]);
+                    }
+                  }}
+                >
+                  {showCreate ? "Close form" : "Create user"}
+                </button>
+              ) : null
+            }
+          />
+
+          <FlashAlert error={error} message={message} />
+
+          {canFullUserAdmin && showCreate && (
+            <CreateUserForm
+              name={name}
+              email={email}
+              password={password}
+              role={role}
+              roles={roles}
+              projects={projects}
+              createProjectIds={createProjectIds}
+              busy={createMutation.isPending}
+              onName={setName}
+              onEmail={setEmail}
+              onPassword={setPassword}
+              onRole={setRole}
+              onToggleProject={(id) =>
+                setCreateProjectIds((prev) =>
+                  prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+                )
+              }
+              onSubmit={onCreate}
+            />
+          )}
+
+          {canFullUserAdmin && editing && (
+            <EditUserForm
+              editing={editing}
+              meId={me?.id}
+              roles={roles}
+              editPassword={editPassword}
+              busy={updateMutation.isPending}
+              onChange={setEditing}
+              onPassword={setEditPassword}
+              onCancel={() => setEditing(null)}
+              onSubmit={onSaveEdit}
+            />
+          )}
+
+          {roleChangeUser && (
+            <ChangeRoleForm
+              user={roleChangeUser}
+              roles={roles}
+              value={roleChangeValue}
+              busy={changeRoleMutation.isPending}
+              onValue={setRoleChangeValue}
+              onCancel={() => setRoleChangeUser(null)}
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (roleChangeValue === roleChangeUser.role) {
+                  setRoleChangeUser(null);
+                  return;
                 }
+                if (
+                  !window.confirm(
+                    `Change ${roleChangeUser.name}'s role from ${roleLabel(roleChangeUser.role)} to ${roleLabel(roleChangeValue)}?`,
+                  )
+                ) {
+                  return;
+                }
+                changeRoleMutation.mutate({
+                  id: roleChangeUser.id,
+                  role: roleChangeValue,
+                  userName: roleChangeUser.name,
+                });
               }}
-            >
-              {showCreate ? "Close form" : "Create user"}
-            </button>
-          ) : null
-        }
-      />
+            />
+          )}
 
-      <FlashAlert error={error} message={message} />
-
-      {canFullUserAdmin && showCreate && (
-        <CreateUserForm
-          name={name}
-          email={email}
-          password={password}
-          role={role}
-          roles={roles}
-          projects={projects}
-          createProjectIds={createProjectIds}
-          busy={createMutation.isPending}
-          onName={setName}
-          onEmail={setEmail}
-          onPassword={setPassword}
-          onRole={setRole}
-          onToggleProject={(id) =>
-            setCreateProjectIds((prev) =>
-              prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-            )
-          }
-          onSubmit={onCreate}
-        />
-      )}
-
-      {canFullUserAdmin && editing && (
-        <EditUserForm
-          editing={editing}
-          meId={me?.id}
-          roles={roles}
-          editPassword={editPassword}
-          busy={updateMutation.isPending}
-          onChange={setEditing}
-          onPassword={setEditPassword}
-          onCancel={() => setEditing(null)}
-          onSubmit={onSaveEdit}
-        />
-      )}
-
-      {roleChangeUser && (
-        <ChangeRoleForm
-          user={roleChangeUser}
-          roles={roles}
-          value={roleChangeValue}
-          busy={changeRoleMutation.isPending}
-          onValue={setRoleChangeValue}
-          onCancel={() => setRoleChangeUser(null)}
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (roleChangeValue === roleChangeUser.role) {
-              setRoleChangeUser(null);
-              return;
-            }
-            if (
-              !window.confirm(
-                `Change ${roleChangeUser.name}'s role from ${roleLabel(roleChangeUser.role)} to ${roleLabel(roleChangeValue)}?`,
-              )
-            ) {
-              return;
-            }
-            changeRoleMutation.mutate({
-              id: roleChangeUser.id,
-              role: roleChangeValue,
-              userName: roleChangeUser.name,
-            });
-          }}
-        />
-      )}
-
-      <UserFiltersBar
-        projects={projects}
-        projectFilter={projectFilter}
-        onProjectFilter={(id) => {
-          setProjectFilter(id);
-          setRoleFilter("ALL");
-        }}
-        search={search}
-        onSearch={setSearch}
-        statusFilter={statusFilter}
-        onStatusFilter={setStatusFilter}
-        roleFilter={roleFilter}
-        onRoleFilter={setRoleFilter}
-        statusCounts={statusCounts}
-        roleCounts={roleCounts}
-        filtersDirty={filtersDirty}
-        onClear={clearFilters}
-      />
-
-      <div className="tb-card overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--line)] px-4 py-3">
-          <h3 className="text-sm font-bold text-[var(--ink)]">
-            {projectFilter ? "Project members" : "Users"}
-            <span className="ml-2 font-semibold text-[var(--muted)]">
-              ({filtered.length}
-              {filtered.length !== allUsers.length ? ` of ${allUsers.length}` : ""})
-            </span>
-          </h3>
+          <UserFiltersBar
+            projects={projects}
+            projectFilter={projectFilter}
+            onProjectFilter={(id) => {
+              setProjectFilter(id);
+              setRoleFilter("ALL");
+            }}
+            search={search}
+            onSearch={setSearch}
+            statusFilter={statusFilter}
+            onStatusFilter={setStatusFilter}
+            roleFilter={roleFilter}
+            onRoleFilter={setRoleFilter}
+            statusCounts={statusCounts}
+            roleCounts={roleCounts}
+            filtersDirty={filtersDirty}
+            onClear={clearFilters}
+          />
         </div>
 
-        <QueryStatus
-          isLoading={usersQuery.isLoading}
-          error={usersQuery.error}
-          onRetry={() => void usersQuery.refetch()}
-          loadingText="Loading users…"
-          className="m-4"
-        />
-
-        {!usersQuery.isLoading && filtered.length === 0 && (
-          <div className="p-8 text-center">
-            <p className="font-medium text-[var(--ink)]">
-              {projectFilter ? "No members in this project" : "No users match these filters"}
-            </p>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              {projectFilter
-                ? "Add members from Settings → Members, or create a user assigned to this project."
-                : "Try another role/status, or clear search."}
-            </p>
-            {filtersDirty && (
-              <button type="button" className="tb-btn-ghost mt-4 text-xs" onClick={clearFilters}>
-                Reset filters
-              </button>
-            )}
+        <div className="tb-card shrink-0 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--line)] px-4 py-3">
+            <h3 className="text-sm font-bold text-[var(--ink)]">
+              {projectFilter ? "Project members" : "Users"}
+              <span className="ml-2 font-semibold text-[var(--muted)]">
+                ({filtered.length}
+                {filtered.length !== allUsers.length ? ` of ${allUsers.length}` : ""})
+              </span>
+            </h3>
           </div>
-        )}
 
-        <div className="divide-y divide-[var(--line)]">
-          {filtered.map((u) => (
-            <div
-              key={u.id}
-              className="flex flex-wrap items-center gap-3 px-4 py-3 sm:flex-nowrap"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-[var(--ink)]">
-                  {u.name}
-                  {u.id === me?.id ? (
-                    <span className="ml-2 text-xs font-medium text-[var(--accent)]">(you)</span>
-                  ) : null}
-                </p>
-                <p className="truncate text-xs text-[var(--muted)]">{u.email}</p>
-              </div>
-              <span className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                {roleLabel(u.role)}
-              </span>
-              <span
-                className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${
-                  u.active === false
-                    ? "bg-rose-50 text-rose-700"
-                    : "bg-emerald-50 text-emerald-700"
-                }`}
-              >
-                {u.active === false ? "Inactive" : "Active"}
-              </span>
-              <div className="flex gap-2">
-                {canChangeUserRole(me, u) && (
-                  <button
-                    type="button"
-                    className="tb-btn-ghost text-xs"
-                    onClick={() => {
-                      setRoleChangeUser(u);
-                      setRoleChangeValue(roles.includes(u.role) ? u.role : roles[0] || "TESTER");
-                      setEditing(null);
-                      setShowCreate(false);
-                      setError(null);
-                    }}
-                  >
-                    Change role
-                  </button>
-                )}
-                {canFullUserAdmin && (
-                  <button
-                    type="button"
-                    className="tb-btn-ghost text-xs"
-                    onClick={() => {
-                      setEditing(u);
-                      setEditPassword("");
-                      setError(null);
-                      setShowCreate(false);
-                      setRoleChangeUser(null);
-                    }}
-                  >
-                    Edit
-                  </button>
-                )}
-                {canFullUserAdmin && u.id !== me?.id && u.active !== false && (
-                  <button
-                    type="button"
-                    className="tb-btn-ghost text-xs text-rose-600"
-                    disabled={deleteMutation.isPending}
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `Deactivate ${u.name}? They will no longer be able to sign in.`,
-                        )
-                      ) {
-                        deleteMutation.mutate(u.id);
-                      }
-                    }}
-                  >
-                    Deactivate
-                  </button>
-                )}
-                {isSuperAdmin(me) && u.id !== me?.id && u.active === false && (
-                  <button
-                    type="button"
-                    className="tb-btn-ghost text-xs text-rose-700"
-                    disabled={hardDeleteMutation.isPending}
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `Permanently delete ${u.name}? This cannot be undone. Bug history will keep their name as an ID only.`,
-                        )
-                      ) {
-                        hardDeleteMutation.mutate(u.id);
-                      }
-                    }}
-                  >
-                    Delete forever
-                  </button>
-                )}
-              </div>
+          <QueryStatus
+            isLoading={usersQuery.isLoading}
+            error={usersQuery.error}
+            onRetry={() => void usersQuery.refetch()}
+            loadingText="Loading users…"
+            className="m-4"
+          />
+
+          {!usersQuery.isLoading && filtered.length === 0 && (
+            <div className="p-8 text-center">
+              <p className="font-medium text-[var(--ink)]">
+                {projectFilter ? "No members in this project" : "No users match these filters"}
+              </p>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                {projectFilter
+                  ? "Add members from Settings → Members, or create a user assigned to this project."
+                  : "Try another role/status, or clear search."}
+              </p>
+              {filtersDirty && (
+                <button type="button" className="tb-btn-ghost mt-4 text-xs" onClick={clearFilters}>
+                  Reset filters
+                </button>
+              )}
             </div>
-          ))}
+          )}
+
+          <div className="divide-y divide-[var(--line)]">
+            {filtered.map((u) => (
+              <div
+                key={u.id}
+                className="flex flex-wrap items-center gap-3 px-4 py-3 sm:flex-nowrap"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-[var(--ink)]">
+                    {u.name}
+                    {u.id === me?.id ? (
+                      <span className="ml-2 text-xs font-medium text-[var(--accent)]">(you)</span>
+                    ) : null}
+                  </p>
+                  <p className="truncate text-xs text-[var(--muted)]">{u.email}</p>
+                </div>
+                <span className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                  {roleLabel(u.role)}
+                </span>
+                <span
+                  className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${
+                    u.active === false
+                      ? "bg-rose-50 text-rose-700"
+                      : "bg-emerald-50 text-emerald-700"
+                  }`}
+                >
+                  {u.active === false ? "Inactive" : "Active"}
+                </span>
+                <div className="flex gap-2">
+                  {canChangeUserRole(me, u) && (
+                    <button
+                      type="button"
+                      className="tb-btn-ghost text-xs"
+                      onClick={() => {
+                        setRoleChangeUser(u);
+                        setRoleChangeValue(roles.includes(u.role) ? u.role : roles[0] || "TESTER");
+                        setEditing(null);
+                        setShowCreate(false);
+                        setError(null);
+                      }}
+                    >
+                      Change role
+                    </button>
+                  )}
+                  {canFullUserAdmin && (
+                    <button
+                      type="button"
+                      className="tb-btn-ghost text-xs"
+                      onClick={() => {
+                        setEditing(u);
+                        setEditPassword("");
+                        setError(null);
+                        setShowCreate(false);
+                        setRoleChangeUser(null);
+                      }}
+                    >
+                      Edit
+                    </button>
+                  )}
+                  {canFullUserAdmin && u.id !== me?.id && u.active !== false && (
+                    <button
+                      type="button"
+                      className="tb-btn-ghost text-xs text-rose-600"
+                      disabled={deleteMutation.isPending}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Deactivate ${u.name}? They will no longer be able to sign in.`,
+                          )
+                        ) {
+                          deleteMutation.mutate(u.id);
+                        }
+                      }}
+                    >
+                      Deactivate
+                    </button>
+                  )}
+                  {isSuperAdmin(me) && u.id !== me?.id && u.active === false && (
+                    <button
+                      type="button"
+                      className="tb-btn-ghost text-xs text-rose-700"
+                      disabled={hardDeleteMutation.isPending}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Permanently delete ${u.name}? This cannot be undone. Bug history will keep their name as an ID only.`,
+                          )
+                        ) {
+                          hardDeleteMutation.mutate(u.id);
+                        }
+                      }}
+                    >
+                      Delete forever
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </Shell>
