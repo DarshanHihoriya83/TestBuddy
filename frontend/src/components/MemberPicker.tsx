@@ -1,5 +1,23 @@
-import type { User } from "../types";
+import type { User, UserRole } from "../types";
 import { roleLabel } from "../utils/roles";
+
+const ROLE_CHIP: Record<UserRole, string> = {
+  SUPERADMIN: "is-superadmin",
+  MANAGER: "is-manager",
+  DEVELOPER: "is-developer",
+  TESTER: "is-tester",
+};
+
+function initialsOf(name: string) {
+  return (
+    name
+      .split(/\s+/)
+      .map((p) => p[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "?"
+  );
+}
 
 /** Shared add-member control for org / project panels. */
 export function MemberPicker({
@@ -67,6 +85,9 @@ export function MemberList({
     <div className="mt-3 divide-y divide-[var(--line)]">
       {members.map((m) => (
         <div key={m.id} className="flex flex-wrap items-center gap-3 py-3 sm:flex-nowrap">
+          <span className="tb-user-avatar" aria-hidden>
+            {initialsOf(m.name)}
+          </span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-[var(--ink)]">
               {m.name}
@@ -76,9 +97,7 @@ export function MemberList({
             </p>
             <p className="truncate text-xs text-[var(--muted)]">{m.email}</p>
           </div>
-          <span className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-            {roleLabel(m.role)}
-          </span>
+          <span className={`tb-role-chip ${ROLE_CHIP[m.role]}`}>{roleLabel(m.role)}</span>
           {canRemove && onRemove ? (
             <button
               type="button"
