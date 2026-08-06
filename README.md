@@ -17,13 +17,34 @@ Local run steps: [`Setup.txt`](./Setup.txt).
 
 ## Current status
 
-- Organizations → projects → modules → bugs
-- Extension Bug mode end-to-end (Tester-only sign-in)
-- Recording toolbar, screenshots, AI polish / step humanize
+Built through early Phase 5 (dashboard + exports). Recording / AI / Jira·ADO push remain per `PROJECT_SPEC.md` phases.
+
+### Platform & access
+- Organizations → projects → modules → bugs / test cases
 - Dashboard RBAC: SuperAdmin, Manager, Developer, Tester
-- Role transfer (SuperAdmin / Manager)
-- Bug comments + status updates for Developer & Tester
-- PDF / Excel bug export; JSON import/export APIs
+- Org membership + project membership; Manager project create quotas
+- Users page: role assign / transfer; SuperAdmin hard-delete after deactivate
+- Extension Bug mode end-to-end (Tester-only sign-in)
+- Recording toolbar, screenshots, AI polish / step humanize (when AI service is up)
+
+### Frontend dashboard (Projects → Module workspace)
+- Shared **CommandHeader** on Projects, Project detail, and Module pages
+- Projects list page: no top breadcrumb; header shows title + project count only (no portfolio subtitle, no stat cards, no Bug Health ring)
+- Breadcrumbs under a project: root is **Projects** (links to `/projects`), not Home — e.g. `Projects › Demo Project100 › General`
+- Project detail + Module: list / grid views; **Select all on this page** on both list and grid
+- **Import Project** (JSON) under Create Project
+- Module page: Bugs + Test Cases tabs, Customize view (columns / sort / density / row size), compact **ModuleStatLine** filters
+- Assignee column: initials avatar + name (bugs + test cases, list + grid)
+
+### Export
+- **Single export popup** (Excel / JSON / PDF) from row kebab, or when exactly one checkbox is selected then Export selected
+- Popup shows entity preview + **Contents** counts (e.g. modules / bugs / test cases) + optional details checkbox
+- Multi-select export stays bulk JSON (projects / modules / test cases)
+- Bug export: PDF + Excel (with screenshots) via existing bug export flow
+
+### Docs & run
+- Spec: [`PROJECT_SPEC.md`](./PROJECT_SPEC.md) · conventions: [`.cursor/rules/architecture.mdc`](./.cursor/rules/architecture.mdc)
+- Local setup: [`Setup.txt`](./Setup.txt) · progress detail: [`STATUS.md`](./STATUS.md)
 
 ## Roles (summary)
 

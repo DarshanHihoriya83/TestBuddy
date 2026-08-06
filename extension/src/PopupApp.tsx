@@ -108,7 +108,10 @@ export function PopupApp() {
         setProjects(p);
         const firstProject = p[0];
         if (firstProject) setProjectId(firstProject.id);
-        const tester = u.find((x) => x.role === "TESTER") ?? u[0];
+        const tester =
+          u.find((x) => x.role === "TESTER" && x.active !== false) ??
+          u.find((x) => x.role !== "SUPERADMIN" && x.active !== false) ??
+          u[0];
         if (tester) setAssigneeId(tester.id);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load catalog");
@@ -779,11 +782,13 @@ export function PopupApp() {
           <label>
             Assignee
             <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} required>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} ({u.role})
-                </option>
-              ))}
+              {users
+                .filter((u) => u.role !== "SUPERADMIN" && u.active !== false)
+                .map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.role})
+                  </option>
+                ))}
             </select>
           </label>
           <button className="primary" type="submit" disabled={!canStart}>

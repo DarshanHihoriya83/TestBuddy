@@ -518,16 +518,36 @@ export type BreadcrumbItem = {
   to?: string;
 };
 
+function FolderIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden className="shrink-0 text-[var(--muted)]">
+      <path
+        d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function PageBreadcrumb({
   title,
   crumbs = [],
+  root = { label: "Home", to: "/" },
 }: {
   title: string;
   crumbs?: BreadcrumbItem[];
+  root?: BreadcrumbItem;
 }) {
   const { user } = useAuth();
-  const rootLabel = isSuperAdmin(user) ? "Overview" : "Home";
-  // On the root page itself the trailing segment would just repeat the root link.
+  const rootTo = root.to ?? "/";
+  const isDefaultHome = !root.to || root.to === "/";
+  const rootLabel = isDefaultHome
+    ? isSuperAdmin(user)
+      ? "Overview"
+      : "Home"
+    : root.label;
   const showTitle = crumbs.length > 0 || title !== rootLabel;
   return (
     <div className="tb-breadcrumb-bar">
@@ -536,13 +556,13 @@ export function PageBreadcrumb({
         className="flex min-w-0 items-center gap-2 text-sm text-[var(--muted)]"
       >
         <Link
-          to="/"
+          to={rootTo}
           className={`inline-flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 transition hover:bg-[var(--bg0)] hover:text-[var(--ink)] ${
             showTitle ? "" : "font-semibold text-[var(--accent)]"
           }`}
           title={rootLabel}
         >
-          <HomeIcon />
+          {rootTo === "/" ? <HomeIcon /> : <FolderIcon />}
           <span className="hidden sm:inline">{rootLabel}</span>
         </Link>
         {crumbs.map((crumb) => (

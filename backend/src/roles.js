@@ -66,6 +66,22 @@ export function canAssignRole(actor, newRole) {
   return role !== "SUPERADMIN" && canManageRole(actor, role);
 }
 
+/** Can actor assign work (bug/test case) to target user? SuperAdmin is never a work assignee. */
+export function canAssignWorkTo(actor, targetUser) {
+  if (!actor || !targetUser) return false;
+  if (targetUser.active === false) return false;
+  if (normalizeRole(targetUser.role) === "SUPERADMIN") return false;
+  return true;
+}
+
+/** Can actor add target as org/project member? Non–SuperAdmins cannot add a SuperAdmin. */
+export function canAddAsMember(actor, targetUser) {
+  if (!actor || !targetUser) return false;
+  if (targetUser.active === false) return false;
+  if (normalizeRole(targetUser.role) === "SUPERADMIN" && !isSuperAdmin(actor)) return false;
+  return true;
+}
+
 export function canCreateOrganization(user) {
   return isSuperAdmin(user);
 }

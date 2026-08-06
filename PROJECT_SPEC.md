@@ -290,6 +290,8 @@ Validate the model's JSON server-side before returning it to the backend — LLM
 | 5 | Integrations: Excel, JSON, Jira, Azure DevOps. |
 | 6 | Hardening: sensitive-field masking, Edge/Firefox parity, integration-settings UI, permission-justification copy for store review. |
 
+**Implementation progress (repo):** Phases 0–3 largely done; Phase 4 partial (dashboard test cases); Phase 5 partial (Excel/JSON/PDF export + project import; Jira/ADO push not done). Keep the living checklist in [`STATUS.md`](./STATUS.md) — update that file when shipping dashboard/export work instead of rewriting this table every time.
+
 ---
 
 ## 13. Opening message to paste into Cursor (Phase 0 + 1 only)

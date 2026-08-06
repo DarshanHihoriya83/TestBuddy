@@ -76,7 +76,7 @@ export function ProjectEditPage() {
     saveMutation.mutate();
   }
   return (
-    <Shell title="Edit project">
+    <Shell title="Edit project" crumbRoot={{ label: "Projects", to: "/projects" }}>
       <Link to={`/projects/${id}`} className="tb-link text-sm">
         ← Back to project
       </Link>

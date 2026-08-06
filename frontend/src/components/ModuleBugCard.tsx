@@ -16,6 +16,7 @@ import { priorityTone, statusTone } from "../utils/bugUi";
 import { BugScreenshots, BugStepsTable } from "./BugFullCard";
 import { ExportFormatModal } from "./ExportFormatModal";
 import { FlashAlert } from "./FlashAlert";
+import { assignableUsers } from "../utils/roles";
 
 const STATUSES: BugStatus[] = [
   "NEW",
@@ -406,13 +407,11 @@ export function ModuleBugCard({
                 onChange={(e) => setForm({ ...form, assigneeId: e.target.value })}
                 required
               >
-                {users
-                  .filter((u) => u.active !== false)
-                  .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.role})
-                    </option>
-                  ))}
+                {assignableUsers(user, users).map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.role})
+                  </option>
+                ))}
               </select>
             </label>
             <label className="tb-label">

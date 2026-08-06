@@ -31,6 +31,7 @@ import {
 import { queryKeys } from "../queryKeys";
 import type { User, UserRole } from "../types";
 import {
+  addableMemberUsers,
   canManageProjectMembers,
   canManageRole,
   canTransferRoles,
@@ -526,8 +527,8 @@ function MembersSection({
 
   const members = membersQuery.data ?? [];
   const memberIds = new Set(members.map((m) => m.id));
-  const addableUsers = (usersQuery.data ?? []).filter(
-    (u) => u.active !== false && !memberIds.has(u.id),
+  const addableUsers = addableMemberUsers(user, usersQuery.data ?? []).filter(
+    (u) => !memberIds.has(u.id),
   );
 
   const addMutation = useMutation({

@@ -150,3 +150,11 @@ Recent updates
 - Users page: Change role UI; SuperAdmin hard-delete after deactivate
 - SuperAdmin landing page is the platform Overview (org/project/user stats, capacity, attention list)
 - Organizations directory: table + card views, search, pagination; list scrolls inside the card
+- STATUS.md — living “what’s built” doc (phase map + dashboard/export details)
+- Projects page: CommandHeader; Import Project; list/grid + select-all; no breadcrumb /
+- Project + Module: breadcrumbs root = Projects (not Home); CommandHeader
+- Module page: Customize view, list/grid, ModuleStatLine, assignee initials avatars
+- Single export popup (Excel / JSON / PDF) + Contents counts for one project/module/test case
+- Multi-select export remains bulk JSON
+- Table column widths proportional (Projects / Modules / Bugs / Test Cases list views)
+- Organizations, modules, bug comments, role transfer, Tester-only extension (as before)

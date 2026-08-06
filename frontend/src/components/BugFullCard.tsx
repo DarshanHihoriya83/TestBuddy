@@ -3,6 +3,13 @@ import { Link } from "react-router-dom";
 import type { Bug, BugScreenshot } from "../types";
 import { AuthImage } from "./AuthImage";
 
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
+}
+
 function plainText(value?: string | null) {
   return (value ?? "").replace(/\*\*/g, "").trim();
 }
@@ -187,7 +194,12 @@ export function BugFullCard({
       <dl className="grid gap-3 rounded-xl border border-[var(--line)] bg-white p-4 text-sm sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <div>
           <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Assignee</dt>
-          <dd className="mt-1 font-medium">{assigneeName}</dd>
+          <dd className="mt-1 flex items-center gap-2 font-medium">
+            <span className="tb-avatar-sm" aria-hidden>
+              {initials(assigneeName)}
+            </span>
+            <span className="truncate">{assigneeName}</span>
+          </dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Reporter</dt>

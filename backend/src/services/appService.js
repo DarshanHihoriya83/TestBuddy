@@ -12,6 +12,8 @@ import { generateToken } from "./jwt.js";
 import { config } from "../config.js";
 import {
   canAssignRole,
+  canAssignWorkTo,
+  canAddAsMember,
   canCommentOnBug,
   canCreateBug,
   canCreateOrganization,
@@ -338,7 +340,7 @@ async function requireBug(id) {
   return rows[0];
 }
 
-async function validateRefs(projectId, cycleId, assigneeId) {
+async function validateRefs(projectId, cycleId, assigneeId, actor = null) {
   const project = await query(`SELECT 1 FROM projects WHERE id = $1`, [projectId]);
   if (!project.rowCount) throw badRequest("Unknown projectId");
 
@@ -349,10 +351,30 @@ async function validateRefs(projectId, cycleId, assigneeId) {
   }
 
   const user = await query(
-    `SELECT 1 FROM users WHERE id = $1 AND active = true`,
+    `SELECT id, role, active FROM users WHERE id = $1 AND active = true`,
     [assigneeId],
   );
   if (!user.rowCount) throw badRequest("Unknown or inactive assigneeId");
+  if (actor && !canAssignWorkTo(actor, user.rows[0])) {
+    throw forbidden("SuperAdmin cannot be assigned to bugs or test cases");
+  }
+}
+
+async function assertAssignableUser(actor, userId, { optional = false } = {}) {
+  if (!userId) {
+    if (optional) return;
+    throw badRequest("assigneeId is required");
+  }
+  const { rows } = await query(
+    `SELECT id, role, active FROM users WHERE id = $1`,
+    [userId],
+  );
+  if (!rows[0] || rows[0].active === false) {
+    throw badRequest("Unknown or inactive assigneeId");
+  }
+  if (!canAssignWorkTo(actor, rows[0])) {
+    throw forbidden("SuperAdmin cannot be assigned to bugs or test cases");
+  }
 }
 
 async function replaceSteps(client, bugId, steps) {
@@ -617,6 +639,9 @@ export async function addProjectMember(actor, projectId, userId, { requireManage
   );
   if (!user.rows[0]) throw notFound("User not found");
   if (user.rows[0].active === false) throw badRequest("Cannot add an inactive user");
+  if (!canAddAsMember(actor, user.rows[0])) {
+    throw forbidden("Only SuperAdmin can add a SuperAdmin to a project");
+  }
   if (!(await isOrgMember(project.organization_id, userId))) {
     throw badRequest("User must belong to the organization before being added to a project");
   }
@@ -1179,6 +1204,9 @@ export async function addOrganizationMember(actor, organizationId, userId) {
   );
   if (!users[0]) throw notFound("User not found");
   if (users[0].active === false) throw badRequest("Cannot add an inactive user");
+  if (!canAddAsMember(actor, users[0])) {
+    throw forbidden("Only SuperAdmin can add a SuperAdmin to an organization");
+  }
   await query(
     `INSERT INTO organization_members (organization_id, user_id, created_at)
      VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING`,
@@ -1614,7 +1642,7 @@ export async function createBug(request, reporter) {
   }
   if (!request.projectId) throw badRequest("projectId is required");
   await assertCanAccessProject(reporter, request.projectId);
-  await validateRefs(request.projectId, request.cycleId, request.assigneeId);
+  await validateRefs(request.projectId, request.cycleId, request.assigneeId, reporter);
   await validateModuleForProject(request.moduleId, request.projectId);
   return withTransaction(async (client) => {
     const id = randomUUID();
@@ -1670,7 +1698,12 @@ export async function updateBug(id, request, actor) {
     const assigneeId = request.assigneeId ?? existing.assignee_id;
     const moduleId =
       request.moduleId !== undefined ? request.moduleId : existing.module_id;
-    await validateRefs(projectId, cycleId, assigneeId);
+    await validateRefs(
+      projectId,
+      cycleId,
+      assigneeId,
+      request.assigneeId !== undefined ? actor : null,
+    );
     await validateModuleForProject(moduleId, projectId);
     if (String(projectId) !== String(existing.project_id)) {
       await assertCanAccessProject(actor, projectId);
@@ -1873,6 +1906,8 @@ export async function createTestCase(actor, body) {
     }
   }
 
+  await assertAssignableUser(actor, assigneeId, { optional: true });
+
   const id = randomUUID();
   const { rows } = await query(
     `INSERT INTO test_cases (
@@ -1935,6 +1970,10 @@ export async function updateTestCase(actor, id, body) {
     if (!mods[0] || mods[0].project_id !== existing.projectId) {
       throw badRequest("moduleId does not belong to project");
     }
+  }
+
+  if (body && Object.prototype.hasOwnProperty.call(body, "assigneeId")) {
+    await assertAssignableUser(actor, assigneeId, { optional: true });
   }
 
   const { rows } = await query(

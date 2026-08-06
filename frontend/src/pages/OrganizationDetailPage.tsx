@@ -17,6 +17,7 @@ import { QueryStatus } from "../components/QueryStatus";
 import { Shell } from "../components/Shell";
 import { queryKeys } from "../queryKeys";
 import {
+  addableMemberUsers,
   canCreateOrganization,
   canCreateProject,
   canManageOrgMembers,
@@ -67,8 +68,9 @@ export function OrganizationDetailPage() {
   const members = membersQuery.data ?? [];
   const memberIds = useMemo(() => new Set(members.map((m) => m.id)), [members]);
   const addable = useMemo(
-    () => (usersQuery.data ?? []).filter((u) => u.active !== false && !memberIds.has(u.id)),
-    [usersQuery.data, memberIds],
+    () =>
+      addableMemberUsers(user, usersQuery.data ?? []).filter((u) => !memberIds.has(u.id)),
+    [user, usersQuery.data, memberIds],
   );
 
   useEffect(() => {

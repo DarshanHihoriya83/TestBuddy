@@ -19,7 +19,7 @@ import { QueryStatus } from "../components/QueryStatus";
 import { Shell } from "../components/Shell";
 import { queryKeys } from "../queryKeys";
 import type { Bug, BugFilters, BugPriority, BugSeverity, BugStatus } from "../types";
-import { canCreateBug, canDeleteBug } from "../utils/roles";
+import { canCreateBug, canDeleteBug, assignableUsers } from "../utils/roles";
 
 function downloadJson(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -212,8 +212,7 @@ export function BugsPage() {
           className={`mb-6 grid shrink-0 gap-3 md:grid-cols-3 ${
             showCycleFilter ? "lg:grid-cols-7" : "lg:grid-cols-6"
           }`}
-        >
-          <label className="tb-label">
+        >          <label className="tb-label">
             Project
             <select
               className="tb-select"

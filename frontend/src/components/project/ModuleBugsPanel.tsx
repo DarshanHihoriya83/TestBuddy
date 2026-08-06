@@ -2,6 +2,16 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import type { Bug, BugPriority, BugStatus, User } from "../../types";
+import {
+  defaultBugPrefs,
+  tableDensityClass,
+  type ModuleViewPrefs,
+} from "../../utils/moduleViewPrefs";
+import { assignableUsers } from "../../utils/roles";
+import { ModuleBulkBar } from "./ModuleBulkBar";
+import { ModuleFilterChips, type FilterChip } from "./ModuleFilterChips";
+import { ModuleStatLine, type StatItem } from "./ModuleStatLine";
+import { useAuth } from "../../auth";
 
 type MenuPos = { top: number; left: number };
 
@@ -237,9 +247,12 @@ export function ModuleBugsPanel({
   onToggleAll,
   onOpenBug,
   onExportOne,
+  onExportSelected,
+  onClearSelection,
   exportBusy,
   search,
   onSearchChange,
+  viewPrefs = defaultBugPrefs(),
 }: {
   projectId: string;
   moduleId: string;
@@ -251,21 +264,28 @@ export function ModuleBugsPanel({
   onToggleAll: (selected: boolean, ids: string[]) => void;
   onOpenBug: (bugId: string) => void;
   onExportOne: (bugId: string) => void;
+  onExportSelected?: () => void;
+  onClearSelection?: () => void;
   exportBusy?: boolean;
   search: string;
   onSearchChange: (v: string) => void;
+  viewPrefs?: ModuleViewPrefs;
 }) {
   const [filterStatus, setFilterStatus] = useState<"" | "Open" | "In Progress" | "Resolved" | "Closed">("");
   const [filterPriority, setFilterPriority] = useState<BugPriority | "">("");
   const [filterAssignee, setFilterAssignee] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const col = (key: string) => viewPrefs.columns[key] !== false;
+  const isGrid = viewPrefs.viewMode === "grid";
+  const { user } = useAuth();
+  const assigneeChoices = useMemo(() => assignableUsers(user, users), [user, users]);
 
   const nameOf = (uid: string) => users.find((u) => u.id === uid)?.name ?? uid.slice(0, 8);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return bugs.filter((b) => {
+    const list = bugs.filter((b) => {
       const label = displayStatus(b.status);
       if (filterStatus && label !== filterStatus) return false;
       if (filterPriority && b.priority !== filterPriority) return false;
@@ -278,7 +298,30 @@ export function ModuleBugsPanel({
         nameOf(b.assigneeId).toLowerCase().includes(q)
       );
     });
-  }, [bugs, search, filterStatus, filterPriority, filterAssignee, users]);
+
+    const dir = viewPrefs.sortDir === "asc" ? 1 : -1;
+    const priorityRank: Record<string, number> = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+    return [...list].sort((a, b) => {
+      let cmp = 0;
+      switch (viewPrefs.sortBy) {
+        case "title":
+          cmp = a.title.localeCompare(b.title);
+          break;
+        case "status":
+          cmp = displayStatus(a.status).localeCompare(displayStatus(b.status));
+          break;
+        case "priority":
+          cmp = (priorityRank[a.priority] ?? 0) - (priorityRank[b.priority] ?? 0);
+          break;
+        default: {
+          const at = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+          const bt = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+          cmp = at - bt;
+        }
+      }
+      return cmp * dir;
+    });
+  }, [bugs, search, filterStatus, filterPriority, filterAssignee, users, viewPrefs.sortBy, viewPrefs.sortDir]);
 
   const stats = useMemo(() => {
     const total = bugs.length;
@@ -314,76 +357,65 @@ export function ModuleBugsPanel({
     onSearchChange("");
   }
 
+  const filtersActive =
+    search.trim().length > 0 || !!filterStatus || !!filterPriority || !!filterAssignee;
+
+  const filterChips: FilterChip[] = useMemo(() => {
+    const chips: FilterChip[] = [];
+    if (search.trim()) {
+      chips.push({ key: "search", label: `Search: ${search.trim()}`, onRemove: () => onSearchChange("") });
+    }
+    if (filterStatus) {
+      chips.push({ key: "status", label: `Status: ${filterStatus}`, onRemove: () => setFilterStatus("") });
+    }
+    if (filterPriority) {
+      chips.push({ key: "priority", label: `Priority: ${filterPriority}`, onRemove: () => setFilterPriority("") });
+    }
+    if (filterAssignee) {
+      const name = assigneeChoices.find((u) => u.id === filterAssignee)?.name ?? filterAssignee;
+      chips.push({ key: "assignee", label: `Assignee: ${name}`, onRemove: () => setFilterAssignee("") });
+    }
+    return chips;
+  }, [search, filterStatus, filterPriority, filterAssignee, assigneeChoices, onSearchChange]);
+
+  const bulkVisible = selectedIds.size > 0;
+
   if (loading) {
-    return <p className="px-4 py-6 text-sm text-[var(--muted)]">Loading bugs…</p>;
+    return (
+      <div className="tb-mod-loading">
+        <div className="tb-mod-loading-shimmer" aria-hidden />
+        <p>Loading bugs…</p>
+      </div>
+    );
   }
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="grid shrink-0 gap-3 px-4 pb-4 pt-1 sm:grid-cols-2 xl:grid-cols-5">
-        <div className="tb-bug-stat">
-          <div className="tb-bug-stat-icon tb-bug-stat-icon-blue">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.75" />
-              <path d="M12 3v3M12 21v-3M3 12h3M21 12h-3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
-            </svg>
-          </div>
-          <div>
-            <p className="tb-mod-stat-label">Total Bugs</p>
-            <p className="tb-mod-stat-value">{stats.total}</p>
-          </div>
-        </div>
-        <div className="tb-bug-stat">
-          <div className="tb-bug-stat-icon tb-bug-stat-icon-amber">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path d="M12 8v5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              <circle cx="12" cy="16.5" r="1" fill="currentColor" />
-              <path d="M10.2 4.8 3.4 17.2A2 2 0 0 0 5.2 20h13.6a2 2 0 0 0 1.8-2.8L13.8 4.8a2 2 0 0 0-3.6 0Z" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <div>
-            <p className="tb-mod-stat-label">Open</p>
-            <p className="tb-mod-stat-value">{stats.open}</p>
-          </div>
-        </div>
-        <div className="tb-bug-stat">
-          <div className="tb-bug-stat-icon tb-bug-stat-icon-violet">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
-              <path d="M18 4v4h-4M6 20v-4h4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <div>
-            <p className="tb-mod-stat-label">In Progress</p>
-            <p className="tb-mod-stat-value">{stats.inProgress}</p>
-          </div>
-        </div>
-        <div className="tb-bug-stat">
-          <div className="tb-bug-stat-icon tb-bug-stat-icon-green">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path d="m5 12 4.5 4.5L19 7" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <div>
-            <p className="tb-mod-stat-label">Resolved</p>
-            <p className="tb-mod-stat-value">{stats.resolved}</p>
-          </div>
-        </div>
-        <div className="tb-bug-stat">
-          <div className="tb-bug-stat-icon tb-bug-stat-icon-slate">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.75" />
-              <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
-            </svg>
-          </div>
-          <div>
-            <p className="tb-mod-stat-label">Closed</p>
-            <p className="tb-mod-stat-value">{stats.closed}</p>
-          </div>
-        </div>
-      </div>
+  const statItems: StatItem[] = [
+    {
+      key: "total",
+      label: "Total",
+      value: stats.total,
+      tone: "blue",
+      active: filterStatus === "",
+      onSelect: () => setFilterStatus(""),
+    },
+    ...([
+      ["Open", stats.open, "amber"],
+      ["In Progress", stats.inProgress, "violet"],
+      ["Resolved", stats.resolved, "green"],
+      ["Closed", stats.closed, "slate"],
+    ] as const).map(([status, value, tone]) => ({
+      key: status,
+      label: status,
+      value,
+      tone,
+      active: filterStatus === status,
+      onSelect: () => setFilterStatus(filterStatus === status ? "" : status),
+    })),
+  ];
 
-      <div className="tb-mod-toolbar">
+  return (
+    <div className={`tb-mod-panel flex min-h-0 flex-1 flex-col ${tableDensityClass(viewPrefs)}`}>
+      <div className="tb-mod-toolbar tb-mod-command-toolbar shrink-0">
         <div className="relative min-w-[12rem] flex-1 max-w-sm">
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]">
             <SearchIcon />
@@ -424,24 +456,38 @@ export function ModuleBugsPanel({
           onChange={(e) => setFilterAssignee(e.target.value)}
         >
           <option value="">Assignee</option>
-          {users.map((u) => (
+          {assigneeChoices.map((u) => (
             <option key={u.id} value={u.id}>
               {u.name}
             </option>
           ))}
         </select>
-        <button type="button" className="tb-link text-sm" onClick={clearFilters}>
-          Clear
-        </button>
-        <Link
-          to={`/bugs?projectId=${encodeURIComponent(projectId)}&moduleId=${encodeURIComponent(moduleId)}`}
-          className="tb-btn-primary ml-auto shrink-0 text-sm"
-        >
-          + Report Bug
-        </Link>
+        {filtersActive && (
+          <button type="button" className="tb-link text-sm lg:hidden" onClick={clearFilters}>
+            Clear
+          </button>
+        )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="tb-mod-subbar shrink-0">
+        <ModuleFilterChips chips={filterChips} onClearAll={clearFilters} />
+        <ModuleStatLine items={statItems} label="Bug summary" />
+      </div>
+
+      <ModuleBulkBar
+        visible={bulkVisible}
+        selectedCount={selectedIds.size}
+        pageCount={pageItems.length}
+        allSelected={allSelected}
+        exportLabel="Export selected"
+        exportBusy={exportBusy}
+        showSelectAll={!isGrid}
+        onToggleAllPage={(checked) => onToggleAll(checked, pageItems.map((b) => b.id))}
+        onExport={() => onExportSelected?.()}
+        onClear={() => onClearSelection?.()}
+      />
+
+      <div className={`tb-mod-content min-h-0 flex-1 overflow-auto ${isGrid ? "is-grid" : "is-list"}`}>
         {pageItems.length === 0 ? (
           <div className="tb-mod-empty">
             <div className="tb-mod-empty-icon" aria-hidden>
@@ -454,9 +500,110 @@ export function ModuleBugsPanel({
             <p className="max-w-sm text-sm text-[var(--muted)]">
               File one from the extension, or open the bugs board to review across projects.
             </p>
+            <Link
+              to={`/bugs?projectId=${encodeURIComponent(projectId)}&moduleId=${encodeURIComponent(moduleId)}`}
+              className="tb-btn-primary mt-2 text-sm"
+            >
+              + Report Bug
+            </Link>
+          </div>
+        ) : isGrid ? (
+          <div className="tb-mod-grid p-4">
+            <div className="tb-mod-grid-head">
+              <label className="tb-mod-grid-select-all">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-[var(--accent)]"
+                  checked={allSelected}
+                  onChange={(e) => onToggleAll(e.target.checked, pageItems.map((b) => b.id))}
+                  aria-label="Select all on this page"
+                />
+                Select all on this page
+              </label>
+              <span className="tb-mod-grid-head-count">{pageItems.length} shown</span>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {pageItems.map((bug, i) => {
+              const label = displayStatus(bug.status);
+              const assignee = nameOf(bug.assigneeId);
+              const selected = selectedIds.has(bug.id);
+              return (
+                <div
+                  key={bug.id}
+                  className={`tb-qa-card ${selected ? "is-selected" : ""}`}
+                  style={{ animationDelay: `${i * 35}ms` }}
+                >
+                  <div className={`tb-qa-card-ribbon ${statusPillClass(label)}`} aria-hidden />
+                  <div className="tb-qa-card-top">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 shrink-0 accent-[var(--accent)]"
+                      checked={selected}
+                      onChange={(e) => onToggleOne(bug.id, e.target.checked)}
+                      aria-label={`Select ${bug.title}`}
+                    />
+                    <BugKebab
+                      onView={() => onOpenBug(bug.id)}
+                      onExport={() => onExportOne(bug.id)}
+                      exportBusy={exportBusy}
+                    />
+                  </div>
+                  <div className="tb-qa-card-body">
+                    {col("id") && (
+                      <button
+                        type="button"
+                        className="tb-qa-card-id"
+                        onClick={() => onOpenBug(bug.id)}
+                      >
+                        {bugDisplayId(bug.id)}
+                      </button>
+                    )}
+                    {col("title") && (
+                      <button
+                        type="button"
+                        className="tb-qa-card-title"
+                        onClick={() => onOpenBug(bug.id)}
+                      >
+                        {bug.title}
+                      </button>
+                    )}
+                    <div className="tb-qa-card-tags">
+                      {col("status") && (
+                        <span className={`tb-bug-status-pill ${statusPillClass(label)}`}>{label}</span>
+                      )}
+                      {col("priority") && <PriorityCell priority={bug.priority} />}
+                    </div>
+                  </div>
+                  <div className="tb-qa-card-foot">
+                    {col("assignee") && (
+                      <span className="inline-flex max-w-[60%] items-center gap-2">
+                        <span className="tb-avatar-sm shrink-0" aria-hidden>
+                          {initials(assignee)}
+                        </span>
+                        <span className="truncate text-xs text-[var(--ink)]">{assignee}</span>
+                      </span>
+                    )}
+                    {col("updatedAt") && (
+                      <span className="text-xs text-[var(--muted)]">{formatDate(bug.updatedAt)}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            </div>
           </div>
         ) : (
-          <table className="tb-table">
+          <table className="tb-table tb-mod-table">
+            <colgroup>
+              <col className="tb-col-check" />
+              {col("id") && <col className="tb-col-id" />}
+              {col("title") && <col className="tb-col-title" />}
+              {col("status") && <col className="tb-col-status" />}
+              {col("priority") && <col className="tb-col-priority" />}
+              {col("assignee") && <col className="tb-col-assignee" />}
+              {col("updatedAt") && <col className="tb-col-updated" />}
+              <col className="tb-col-actions" />
+            </colgroup>
             <thead>
               <tr>
                 <th className="w-10 px-3">
@@ -468,12 +615,12 @@ export function ModuleBugsPanel({
                     aria-label="Select all"
                   />
                 </th>
-                <th>Bug ID</th>
-                <th>Title</th>
-                <th>Status</th>
-                <th>Priority</th>
-                <th>Assignee</th>
-                <th>Updated On</th>
+                {col("id") && <th>Bug ID</th>}
+                {col("title") && <th>Title</th>}
+                {col("status") && <th>Status</th>}
+                {col("priority") && <th>Priority</th>}
+                {col("assignee") && <th>Assignee</th>}
+                {col("updatedAt") && <th>Updated On</th>}
                 <th className="tb-table-actions-col">Actions</th>
               </tr>
             </thead>
@@ -482,7 +629,7 @@ export function ModuleBugsPanel({
                 const label = displayStatus(bug.status);
                 const assignee = nameOf(bug.assigneeId);
                 return (
-                  <tr key={bug.id}>
+                  <tr key={bug.id} className={selectedIds.has(bug.id) ? "is-selected" : undefined}>
                     <td className="px-3">
                       <input
                         type="checkbox"
@@ -492,41 +639,54 @@ export function ModuleBugsPanel({
                         aria-label={`Select ${bug.title}`}
                       />
                     </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="font-mono text-xs font-semibold text-[var(--accent)] hover:underline"
-                        onClick={() => onOpenBug(bug.id)}
-                      >
-                        {bugDisplayId(bug.id)}
-                      </button>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="max-w-[18rem] truncate text-left text-sm font-medium text-[var(--ink)] hover:text-[var(--accent)]"
-                        onClick={() => onOpenBug(bug.id)}
-                      >
-                        {bug.title}
-                      </button>
-                    </td>
-                    <td>
-                      <span className={`tb-bug-status-pill ${statusPillClass(label)}`}>{label}</span>
-                    </td>
-                    <td>
-                      <PriorityCell priority={bug.priority} />
-                    </td>
-                    <td>
-                      <span className="inline-flex items-center gap-2">
-                        <span className="tb-avatar-sm" aria-hidden>
-                          {initials(assignee)}
+                    {col("id") && (
+                      <td>
+                        <button
+                          type="button"
+                          className="font-mono text-xs font-semibold text-[var(--accent)] hover:underline"
+                          onClick={() => onOpenBug(bug.id)}
+                        >
+                          {bugDisplayId(bug.id)}
+                        </button>
+                      </td>
+                    )}
+                    {col("title") && (
+                      <td>
+                        <button
+                          type="button"
+                          title={bug.title}
+                          className="block w-full max-w-full truncate text-left text-sm font-medium text-[var(--ink)] hover:text-[var(--accent)]"
+                          onClick={() => onOpenBug(bug.id)}
+                        >
+                          {bug.title}
+                        </button>
+                      </td>
+                    )}
+                    {col("status") && (
+                      <td>
+                        <span className={`tb-bug-status-pill ${statusPillClass(label)}`}>{label}</span>
+                      </td>
+                    )}
+                    {col("priority") && (
+                      <td>
+                        <PriorityCell priority={bug.priority} />
+                      </td>
+                    )}
+                    {col("assignee") && (
+                      <td>
+                        <span className="inline-flex items-center gap-2">
+                          <span className="tb-avatar-sm" aria-hidden>
+                            {initials(assignee)}
+                          </span>
+                          <span className="truncate text-sm text-[var(--ink)]">{assignee}</span>
                         </span>
-                        <span className="truncate text-sm text-[var(--ink)]">{assignee}</span>
-                      </span>
-                    </td>
-                    <td className="whitespace-nowrap text-sm text-[var(--muted)]">
-                      {formatDate(bug.updatedAt)}
-                    </td>
+                      </td>
+                    )}
+                    {col("updatedAt") && (
+                      <td className="whitespace-nowrap text-sm text-[var(--muted)]">
+                        {formatDate(bug.updatedAt)}
+                      </td>
+                    )}
                     <td className="tb-table-actions-col">
                       <div className="tb-table-actions-cell">
                         <BugKebab

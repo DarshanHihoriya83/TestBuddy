@@ -25,6 +25,7 @@ import type { Bug, BugPriority, BugSeverity, BugStatus, Step } from "../types";
 import { exportBug, type ExportFormat } from "../utils/bugExport";
 import { priorityTone, statusTone } from "../utils/bugUi";
 import {
+  assignableUsers,
   canCommentOnBug,
   canDeleteBug,
   canFullEditBug,
@@ -249,11 +250,11 @@ export function BugDetailPage() {
 
   const bug = bugQuery.data;
   const nameOf = (uid: string) => usersQuery.data?.find((u) => u.id === uid)?.name ?? uid.slice(0, 8);
-  const cycleName = cyclesQuery.data?.find((c) => c.id === bug?.cycleId)?.name ?? "—";
+  const cycleName = cyclesQuery.data?.find((c) => c.id === bug?.cycleId)?.name ?? "�";
   const moduleName =
     modulesQuery.data?.find((m) => m.id === bug?.moduleId)?.name ??
-    (bug?.moduleId ? bug.moduleId.slice(0, 8) : "—");
-  const projectName = projectsQuery.data?.find((p) => p.id === bug?.projectId)?.name ?? "—";
+    (bug?.moduleId ? bug.moduleId.slice(0, 8) : "�");
+  const projectName = projectsQuery.data?.find((p) => p.id === bug?.projectId)?.name ?? "�";
   const backToProject = fromProjectId || bug?.projectId;
   const backToModule =
     fromModuleId && backToProject
@@ -274,7 +275,7 @@ export function BugDetailPage() {
         reporterName: nameOf(bug.reporterId),
       });
       const label = format === "excel" ? "Excel" : format.toUpperCase();
-      setExportMsg(`${label} downloaded — full bug info + screenshots`);
+      setExportMsg(`${label} downloaded � full bug info + screenshots`);
       setExportOpen(false);
     } catch (err) {
       setExportError(true);
@@ -341,7 +342,7 @@ export function BugDetailPage() {
 
   const pageTitle = bug?.title
     ? bug.title.length > 40
-      ? `${bug.title.slice(0, 40)}…`
+      ? `${bug.title.slice(0, 40)}�`
       : bug.title
     : "Bug detail";
 
@@ -351,15 +352,15 @@ export function BugDetailPage() {
       <div className="flex flex-wrap gap-3 text-sm">
         {backToModule ? (
           <Link to={backToModule} className="tb-link">
-            ← Back to module
+            ? Back to module
           </Link>
         ) : backToProject ? (
           <Link to={`/projects/${backToProject}`} className="tb-link">
-            ← Back to project
+            ? Back to project
           </Link>
         ) : (
           <Link to="/bugs" className="tb-link">
-            ← Back to bugs
+            ? Back to bugs
           </Link>
         )}
       </div>
@@ -368,7 +369,7 @@ export function BugDetailPage() {
         isLoading={bugQuery.isLoading}
         error={bugQuery.error}
         onRetry={() => void bugQuery.refetch()}
-        loadingText="Loading…"
+        loadingText="Loading�"
         className="mt-4"
       />
 
@@ -386,7 +387,7 @@ export function BugDetailPage() {
                   className="tb-btn-primary text-xs"
                   disabled={saveFieldsMutation.isPending}
                 >
-                  {saveFieldsMutation.isPending ? "Saving…" : "Save changes"}
+                  {saveFieldsMutation.isPending ? "Saving�" : "Save changes"}
                 </button>
               </div>
             </div>
@@ -465,13 +466,11 @@ export function BugDetailPage() {
                   onChange={(e) => setForm({ ...form, assigneeId: e.target.value })}
                   required
                 >
-                  {(usersQuery.data ?? [])
-                    .filter((u) => u.active !== false)
-                    .map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} ({u.role})
-                      </option>
-                    ))}
+                  {assignableUsers(user, usersQuery.data ?? []).map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.role})
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="tb-label">
@@ -529,7 +528,7 @@ export function BugDetailPage() {
                   className="tb-btn-primary text-xs"
                   disabled={saveStepsMutation.isPending}
                 >
-                  {saveStepsMutation.isPending ? "Saving…" : "Save steps"}
+                  {saveStepsMutation.isPending ? "Saving�" : "Save steps"}
                 </button>
               </div>
             </div>
@@ -752,7 +751,7 @@ export function BugDetailPage() {
                     className="tb-input min-h-[80px]"
                     value={commentBody}
                     onChange={(e) => setCommentBody(e.target.value)}
-                    placeholder="Write a comment…"
+                    placeholder="Write a comment�"
                   />
                 </label>
                 <button
@@ -760,7 +759,7 @@ export function BugDetailPage() {
                   className="tb-btn-primary mt-3 text-sm"
                   disabled={commentMutation.isPending || !commentBody.trim()}
                 >
-                  {commentMutation.isPending ? "Posting…" : "Post comment"}
+                  {commentMutation.isPending ? "Posting�" : "Post comment"}
                 </button>
               </form>
             ) : (

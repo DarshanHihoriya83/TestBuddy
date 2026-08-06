@@ -10,10 +10,12 @@ import {
   fetchUsers,
 } from "../api";
 import { useAuth } from "../auth";
+import { CommandChip, CommandHeader, countLabel } from "../components/CommandHeader";
 import { ExportFormatModal } from "../components/ExportFormatModal";
 import { FlashAlert } from "../components/FlashAlert";
 import { ModuleBugCard } from "../components/ModuleBugCard";
 import { ModuleBugsPanel } from "../components/project/ModuleBugsPanel";
+import { ModuleCustomizeViewModal } from "../components/project/ModuleCustomizeViewModal";
 import { ModuleTestCasesPanel } from "../components/project/ModuleTestCasesPanel";
 import { QueryStatus } from "../components/QueryStatus";
 import { Shell } from "../components/Shell";
@@ -21,7 +23,14 @@ import { queryKeys } from "../queryKeys";
 import type { Bug } from "../types";
 import { exportBugs, type ExportFormat } from "../utils/bugExport";
 import {
+  loadModuleViewPrefs,
+  saveModuleViewPrefs,
+  type ModuleViewMode,
+  type ModuleViewPrefs,
+} from "../utils/moduleViewPrefs";
+import {
   canCommentOnBug,
+  canCreateBug,
   canDeleteBug,
   canFullEditBug,
   canUpdateBugStatus,
@@ -29,11 +38,60 @@ import {
 
 type ModuleTab = "bugs" | "testcases";
 
+function CustomizeIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.75" />
+      <path
+        d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6.1 6.1l1.6 1.6M16.3 16.3l1.6 1.6M6.1 17.9l1.6-1.6M16.3 7.7l1.6-1.6"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function ListIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function GridIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
+    </svg>
+  );
+}
+
 function BugTabIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
       <circle cx="12" cy="12" r="3.5" stroke="currentColor" strokeWidth="1.75" />
       <path d="M12 3v3M12 21v-3M3 12h3M21 12h-3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ModuleIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
     </svg>
   );
 }
@@ -56,6 +114,9 @@ export function ModuleDetailPage() {
   const canDelete = canDeleteBug(user);
 
   const [tab, setTab] = useState<ModuleTab>("bugs");
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [bugViewPrefs, setBugViewPrefs] = useState<ModuleViewPrefs>(() => loadModuleViewPrefs("bugs"));
+  const [tcViewPrefs, setTcViewPrefs] = useState<ModuleViewPrefs>(() => loadModuleViewPrefs("testcases"));
   const [openBugId, setOpenBugId] = useState<string | null>(null);
   const [selectedBugIds, setSelectedBugIds] = useState<Set<string>>(() => new Set());
   const [selectedTcIds, setSelectedTcIds] = useState<Set<string>>(() => new Set());
@@ -113,8 +174,6 @@ export function ModuleDetailPage() {
     cycles.find((c) => c.id === cycleId)?.name ?? cycleId.slice(0, 8);
 
   const openBug = openBugId ? bugs.find((b) => b.id === openBugId) : undefined;
-  const someBugsSelected = selectedBugIds.size > 0;
-  const someTcSelected = selectedTcIds.size > 0;
 
   useEffect(() => {
     if (openBugId && bugsQuery.isSuccess && !bugs.some((b) => b.id === openBugId)) {
@@ -176,9 +235,38 @@ export function ModuleDetailPage() {
     });
   }
 
-  function toggleAllTc(selected: boolean) {
-    setSelectedTcIds(selected ? new Set(testCases.map((t) => t.id)) : new Set());
+  function toggleAllTc(selected: boolean, ids?: string[]) {
+    if (!selected) {
+      setSelectedTcIds(new Set());
+      return;
+    }
+    const target = ids?.length ? ids : testCases.map((t) => t.id);
+    setSelectedTcIds((prev) => {
+      const next = new Set(prev);
+      for (const id of target) next.add(id);
+      return next;
+    });
   }
+
+  const [tcCreateOpen, setTcCreateOpen] = useState(false);
+
+  const bugQualityPulse = useMemo(() => {
+    if (bugs.length === 0) return null;
+    let resolved = 0;
+    for (const b of bugs) {
+      const s = b.status;
+      if (s === "FIXED" || s === "VERIFIED" || s === "CLOSED") resolved += 1;
+    }
+    return Math.round((resolved / bugs.length) * 100);
+  }, [bugs]);
+
+  const tcQualityPulse = useMemo(() => {
+    if (testCases.length === 0) return null;
+    const passed = testCases.filter((t) => t.executionStatus === "PASSED").length;
+    return Math.round((passed / testCases.length) * 100);
+  }, [testCases]);
+
+  const qualityPulse = tab === "bugs" ? bugQualityPulse : tcQualityPulse;
 
   function bugsToExport(ids: string[]): Bug[] {
     const idSet = new Set(ids);
@@ -259,9 +347,34 @@ export function ModuleDetailPage() {
       ? bugsToExport(exportTargetIds ?? [...selectedBugIds])[0]?.title ?? "Bug"
       : `${exportTargetIds?.length ?? selectedBugIds.size} selected bugs`;
 
+  const activeViewPrefs = tab === "bugs" ? bugViewPrefs : tcViewPrefs;
+
+  function applyViewPrefs(prefs: ModuleViewPrefs) {
+    if (tab === "bugs") {
+      setBugViewPrefs(prefs);
+      saveModuleViewPrefs("bugs", prefs);
+    } else {
+      setTcViewPrefs(prefs);
+      saveModuleViewPrefs("testcases", prefs);
+    }
+    setCustomizeOpen(false);
+  }
+
+  function setViewMode(mode: ModuleViewMode) {
+    const next = { ...activeViewPrefs, viewMode: mode };
+    if (tab === "bugs") {
+      setBugViewPrefs(next);
+      saveModuleViewPrefs("bugs", next);
+    } else {
+      setTcViewPrefs(next);
+      saveModuleViewPrefs("testcases", next);
+    }
+  }
+
   return (
     <Shell
       title={mod?.name ?? "Module"}
+      crumbRoot={{ label: "Projects", to: "/projects" }}
       crumbs={[{ label: projectName, to: `/projects/${projectId}` }]}
     >
       <QueryStatus
@@ -328,75 +441,57 @@ export function ModuleDetailPage() {
 
       {mod && !openBug && (
         <div className="tb-mod-workspace flex h-full min-h-0 flex-col overflow-hidden">
-          <header className="tb-mod-hero mb-4 shrink-0">
-            <div className="min-w-0 flex-1">
-              <div className="tb-mod-hero-meta">
-                <span className="tb-mod-chip">Module</span>
-                <span className="tb-mod-chip tb-mod-chip-muted">{bugs.length} bugs</span>
-                <span className="tb-mod-chip tb-mod-chip-muted">{testCases.length} test cases</span>
-              </div>
-              <h1 className="tb-mod-hero-title">{mod.name}</h1>
-              <p className="tb-mod-hero-sub">
-                Capture defects, run checks, and keep this feature area ship-ready.
-              </p>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Link
-                to={`/projects/${projectId}`}
-                className="tb-btn-ghost inline-flex items-center gap-1.5 text-sm"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path d="M15 18 9 12l6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Back to project
-              </Link>
-              {tab === "bugs" ? (
-                <>
-                  <button
-                    type="button"
+          <CommandHeader
+            icon={<ModuleIcon />}
+            title={mod.name}
+            subtitle={
+              tab === "bugs"
+                ? "Track defects, triage priorities, and ship with confidence."
+                : "Run coverage, monitor execution health, and keep quality visible."
+            }
+            meta={
+              <>
+                <CommandChip>{countLabel(bugs.length, "bug")}</CommandChip>
+                <CommandChip>{countLabel(testCases.length, "test case")}</CommandChip>
+              </>
+            }
+            pulse={{
+              value: qualityPulse,
+              label: "Quality Pulse",
+              hint: tab === "bugs" ? "Resolved + closed" : "Passed cases",
+            }}
+            actions={
+              <>
+                <Link
+                  to={`/projects/${projectId}`}
+                  className="tb-btn-ghost inline-flex items-center gap-1.5 text-sm"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path d="M15 18 9 12l6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Back
+                </Link>
+                {tab === "bugs" ? (
+                  <Link
+                    to={`/bugs?projectId=${encodeURIComponent(projectId)}&moduleId=${encodeURIComponent(moduleId)}`}
                     className="tb-btn-primary inline-flex items-center gap-1.5 text-sm"
-                    disabled={!someBugsSelected || exportBusy}
-                    onClick={() => openExport([...selectedBugIds])}
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <path d="M12 3v12M8 11l4 4 4-4M4 19h16" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    Export selected ({selectedBugIds.size})
-                  </button>
-                  <button
-                    type="button"
-                    className="tb-btn-ghost text-sm"
-                    disabled={bugs.length === 0 || exportBusy}
-                    onClick={() => openExport(bugs.map((b) => b.id))}
-                  >
-                    Export all
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="tb-btn-primary inline-flex items-center gap-1.5 text-sm"
-                    disabled={!someTcSelected && testCases.length === 0}
-                    onClick={() => exportTestCasesJson()}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <path d="M12 3v12M8 11l4 4 4-4M4 19h16" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    Export selected ({selectedTcIds.size})
-                  </button>
-                  <button
-                    type="button"
-                    className="tb-btn-ghost text-sm"
-                    disabled={testCases.length === 0}
-                    onClick={() => exportTestCasesJson(testCases.map((t) => t.id))}
-                  >
-                    Export all
-                  </button>
-                </>
-              )}
-            </div>
-          </header>
+                    + Report Bug
+                  </Link>
+                ) : (
+                  canCreateBug(user) && (
+                    <button
+                      type="button"
+                      className="tb-btn-primary inline-flex items-center gap-1.5 text-sm"
+                      onClick={() => setTcCreateOpen(true)}
+                    >
+                      + New Test Case
+                    </button>
+                  )
+                )}
+              </>
+            }
+          />
 
           <FlashAlert
             error={exportError ? exportMsg : null}
@@ -405,7 +500,7 @@ export function ModuleDetailPage() {
           />
 
           <div className="tb-mod-stage flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="tb-mod-stage-top shrink-0">
+            <div className="tb-mod-stage-top tb-mod-command-deck shrink-0">
               <div className="tb-mod-tabs" role="tablist" aria-label="Module content">
                 <button
                   type="button"
@@ -430,9 +525,46 @@ export function ModuleDetailPage() {
                   <span className="tb-mod-tab-count">{testCases.length}</span>
                 </button>
               </div>
+              <div className="tb-mod-stage-actions">
+                <button
+                  type="button"
+                  className="tb-mod-customize-btn"
+                  onClick={() => setCustomizeOpen(true)}
+                >
+                  <CustomizeIcon />
+                  Customize
+                </button>
+                <div className="tb-view-toggle">
+                  <button
+                    type="button"
+                    aria-label="List view"
+                    aria-pressed={activeViewPrefs.viewMode === "list"}
+                    className={`tb-view-toggle-btn ${
+                      activeViewPrefs.viewMode === "list" ? "is-active" : "bg-white text-[var(--muted)]"
+                    }`}
+                    onClick={() => setViewMode("list")}
+                  >
+                    <ListIcon />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Grid view"
+                    aria-pressed={activeViewPrefs.viewMode === "grid"}
+                    className={`tb-view-toggle-btn border-l border-[var(--line)] ${
+                      activeViewPrefs.viewMode === "grid" ? "is-active" : "bg-white text-[var(--muted)]"
+                    }`}
+                    onClick={() => setViewMode("grid")}
+                  >
+                    <GridIcon />
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div
+              key={tab}
+              className="tb-mod-tab-panel flex min-h-0 flex-1 flex-col overflow-hidden"
+            >
               {tab === "bugs" ? (
                 <ModuleBugsPanel
                   projectId={projectId}
@@ -445,14 +577,18 @@ export function ModuleDetailPage() {
                   onToggleAll={toggleAllBugs}
                   onOpenBug={setOpenBugId}
                   onExportOne={(id) => openExport([id])}
+                  onExportSelected={() => openExport([...selectedBugIds])}
+                  onClearSelection={() => setSelectedBugIds(new Set())}
                   exportBusy={exportBusy}
                   search={bugSearch}
                   onSearchChange={setBugSearch}
+                  viewPrefs={bugViewPrefs}
                 />
               ) : (
                 <ModuleTestCasesPanel
                   projectId={projectId}
                   moduleId={moduleId}
+                  moduleName={mod?.name}
                   testCases={testCases}
                   loading={testCasesQuery.isLoading}
                   users={users}
@@ -461,14 +597,27 @@ export function ModuleDetailPage() {
                   selectedIds={selectedTcIds}
                   onToggleOne={toggleTc}
                   onToggleAll={toggleAllTc}
+                  onExportSelected={() => exportTestCasesJson([...selectedTcIds])}
+                  onClearSelection={() => setSelectedTcIds(new Set())}
+                  createOpen={tcCreateOpen}
+                  onCreateOpenChange={setTcCreateOpen}
                   search={tcSearch}
                   onSearchChange={setTcSearch}
+                  viewPrefs={tcViewPrefs}
                 />
               )}
             </div>
           </div>
         </div>
       )}
+
+      <ModuleCustomizeViewModal
+        open={customizeOpen}
+        tab={tab}
+        value={activeViewPrefs}
+        onClose={() => setCustomizeOpen(false)}
+        onApply={applyViewPrefs}
+      />
 
       <ExportFormatModal
         open={exportOpen}

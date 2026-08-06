@@ -105,6 +105,37 @@ export function canChangeUserRole(
   return canManageRole(actor, target.role);
 }
 
+/** Can actor assign work (bug/test case) to this user? SuperAdmin is never a work assignee. */
+export function canAssignWorkTo(
+  actor: User | null | undefined,
+  target: User | null | undefined,
+): boolean {
+  if (!actor || !target) return false;
+  if (target.active === false) return false;
+  if (target.role === "SUPERADMIN") return false;
+  return true;
+}
+
+/** Active users available in bug/test-case assignee dropdowns (never includes SuperAdmin). */
+export function assignableUsers(
+  _actor: User | null | undefined,
+  users: User[],
+): User[] {
+  return users.filter((u) => u.active !== false && u.role !== "SUPERADMIN");
+}
+
+/** Users that may be added as org/project members (non–SuperAdmin actors cannot pick SuperAdmin). */
+export function addableMemberUsers(
+  actor: User | null | undefined,
+  users: User[],
+): User[] {
+  return users.filter((u) => {
+    if (u.active === false) return false;
+    if (u.role === "SUPERADMIN" && actor?.role !== "SUPERADMIN") return false;
+    return true;
+  });
+}
+
 export function roleLabel(role: string) {
   switch (role) {
     case "SUPERADMIN":

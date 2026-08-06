@@ -1,7 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
+import { fetchBugs, fetchTestCases } from "../../api";
+import { queryKeys } from "../../queryKeys";
 import type { Module } from "../../types";
+import { ModuleBulkBar } from "./ModuleBulkBar";
+import { SingleExportModal } from "../SingleExportModal";
+import { exportRecord, type ExportRecordDoc } from "../../utils/recordExport";
 
 type ViewMode = "list" | "grid";
 type MenuPos = { top: number; left: number };
@@ -68,6 +74,30 @@ function MenuDeleteIcon() {
       <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
+}
+
+function MenuExportIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 3v12M8 11l4 4 4-4M4 19h16"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function downloadJson(filename: string, data: unknown) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function ModuleIcon() {
@@ -217,6 +247,7 @@ function KebabMenu({
   canManage,
   deleting,
   onEdit,
+  onExport,
   onDelete,
 }: {
   module: Module;
@@ -224,6 +255,7 @@ function KebabMenu({
   canManage: boolean;
   deleting: boolean;
   onEdit: () => void;
+  onExport: () => void;
   onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -238,7 +270,7 @@ function KebabMenu({
     }
     const rect = btnRef.current.getBoundingClientRect();
     const menuW = 160;
-    const menuH = canManage ? 144 : 44;
+    const menuH = canManage ? 188 : 88;
     const gap = 4;
     const openUp = rect.bottom + gap + menuH > window.innerHeight - 8;
     const left = Math.min(Math.max(8, rect.right - menuW), window.innerWidth - menuW - 8);
@@ -286,6 +318,18 @@ function KebabMenu({
               <MenuViewIcon />
               View
             </Link>
+            <button
+              type="button"
+              role="menuitem"
+              className="tb-menu-item"
+              onClick={() => {
+                setOpen(false);
+                onExport();
+              }}
+            >
+              <MenuExportIcon />
+              Export
+            </button>
             {canManage && (
               <>
                 <button
@@ -358,6 +402,9 @@ export function ProjectModulesPanel({
   onDelete,
   deleting,
   error,
+  showHeader = true,
+  createOpen: createOpenProp,
+  onCreateOpenChange,
 }: {
   projectId: string;
   modules: Module[];
@@ -374,9 +421,18 @@ export function ProjectModulesPanel({
   onDelete: (id: string, name: string) => void;
   deleting?: boolean;
   error?: string | null;
+  showHeader?: boolean;
+  createOpen?: boolean;
+  onCreateOpenChange?: (open: boolean) => void;
 }) {
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createOpenLocal, setCreateOpenLocal] = useState(false);
+  const createOpen = createOpenProp ?? createOpenLocal;
+  const setCreateOpen = (open: boolean) => {
+    setCreateOpenLocal(open);
+    onCreateOpenChange?.(open);
+  };
   const [editModule, setEditModule] = useState<Module | null>(null);
+  const [exportModule, setExportModule] = useState<Module | null>(null);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Module | null>(null);
@@ -384,6 +440,7 @@ export function ProjectModulesPanel({
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const wasCreating = useRef(false);
   const wasRenaming = useRef(false);
   const wasDeleting = useRef(false);
@@ -396,6 +453,14 @@ export function ProjectModulesPanel({
     }
     wasCreating.current = !!creating;
   }, [creating, error, onModuleNameChange, onModuleDescriptionChange]);
+
+  useEffect(() => {
+    if (!createOpen) return;
+    onModuleNameChange("");
+    onModuleDescriptionChange("");
+    // Only reset the form as the dialog opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createOpen]);
 
   useEffect(() => {
     if (wasRenaming.current && !renaming && !error) {
@@ -428,10 +493,101 @@ export function ProjectModulesPanel({
   const startIdx = total === 0 ? 0 : (safePage - 1) * pageSize;
   const endIdx = Math.min(startIdx + pageSize, total);
   const pageItems = filtered.slice(startIdx, endIdx);
+  const allPageSelected = pageItems.length > 0 && pageItems.every((m) => selectedIds.has(m.id));
 
   useEffect(() => {
     setPage(1);
   }, [search, pageSize]);
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const alive = new Set(modules.map((m) => m.id));
+      const next = new Set([...prev].filter((id) => alive.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [modules]);
+
+  function toggleModule(id: string, selected: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleAllOnPage(selected: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const m of pageItems) {
+        if (selected) next.add(m.id);
+        else next.delete(m.id);
+      }
+      return next;
+    });
+  }
+
+  const exportModuleId = exportModule?.id ?? "";
+  const exportTestCasesQuery = useQuery({
+    queryKey: queryKeys.testCases({ projectId, moduleId: exportModuleId }),
+    queryFn: () => fetchTestCases({ projectId, moduleId: exportModuleId }),
+    enabled: !!exportModuleId,
+  });
+  const exportBugsQuery = useQuery({
+    queryKey: queryKeys.bugs({ projectId, moduleId: exportModuleId }),
+    queryFn: () => fetchBugs({ projectId, moduleId: exportModuleId }),
+    enabled: !!exportModuleId,
+  });
+  const exportContentsLoading =
+    !!exportModuleId && (exportTestCasesQuery.isPending || exportBugsQuery.isPending);
+  const exportTcList = exportTestCasesQuery.data ?? [];
+  const moduleExportDoc: ExportRecordDoc | null = exportModule
+    ? {
+        entity: "Module",
+        displayId: exportModule.name,
+        title: exportModule.name,
+        context: exportModule.description?.trim() || "Module workspace",
+        contents: [
+          { label: "Test Cases", value: String(exportTcList.length) },
+          { label: "Bugs", value: String(exportBugsQuery.data?.length ?? 0) },
+          {
+            label: "Steps",
+            value: String(exportTcList.reduce((sum, tc) => sum + (tc.steps?.length ?? 0), 0)),
+          },
+        ],
+        summary: [
+          { label: "Name", value: exportModule.name },
+          { label: "Created On", value: formatDate(exportModule.createdAt) },
+        ],
+        details: [
+          { label: "Description", value: exportModule.description?.trim() || "\u2014" },
+          { label: "Module ID", value: exportModule.id },
+          { label: "Project ID", value: exportModule.projectId },
+        ],
+      }
+    : null;
+
+  function requestBulkExport() {
+    if (selectedIds.size === 1) {
+      const only = modules.find((m) => selectedIds.has(m.id));
+      if (only) {
+        setExportModule(only);
+        return;
+      }
+    }
+    exportSelectedModules();
+  }
+
+  function exportSelectedModules() {
+    const list = modules.filter((m) => selectedIds.has(m.id));
+    if (!list.length) return;
+    downloadJson(`testbuddy-modules-${list.length}.json`, {
+      exportedAt: new Date().toISOString(),
+      count: list.length,
+      modules: list,
+    });
+  }
 
   function openCreate() {
     onModuleNameChange("");
@@ -466,29 +622,31 @@ export function ProjectModulesPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="mb-3 flex shrink-0 flex-wrap items-start justify-between gap-3 px-4 sm:px-5">
-        <div className="min-w-0">
-          <h1 className="text-xl font-bold tracking-tight text-[var(--ink)] sm:text-2xl">Modules</h1>
-          <p className="mt-0.5 text-sm text-[var(--muted)]">
-            {canManage
-              ? "Create and manage modules for this project."
-              : "Browse modules in this project."}
-          </p>
+      {showHeader && (
+        <div className="mb-3 flex shrink-0 flex-wrap items-start justify-between gap-3 px-4 sm:px-5">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold tracking-tight text-[var(--ink)] sm:text-2xl">Modules</h1>
+            <p className="mt-0.5 text-sm text-[var(--muted)]">
+              {canManage
+                ? "Create and manage modules for this project."
+                : "Browse modules in this project."}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Link
+              to="/projects"
+              className="tb-btn-ghost inline-flex items-center gap-1.5 text-sm shadow-sm"
+            >
+              {"\u2190"} Back to projects
+            </Link>
+            {canManage && (
+              <button type="button" className="tb-btn-primary shrink-0" onClick={openCreate}>
+                <span aria-hidden>+</span> Add module
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Link
-            to="/projects"
-            className="tb-btn-ghost inline-flex items-center gap-1.5 text-sm shadow-sm"
-          >
-            {"\u2190"} Back to projects
-          </Link>
-          {canManage && (
-            <button type="button" className="tb-btn-primary shrink-0" onClick={openCreate}>
-              <span aria-hidden>+</span> Add module
-            </button>
-          )}
-        </div>
-      </div>
+      )}
 
       {error && !createOpen && !editModule && !deleteTarget ? (
         <p className="mb-3 px-4 text-sm text-[var(--danger)] sm:px-5">{error}</p>
@@ -535,13 +693,60 @@ export function ProjectModulesPanel({
             </div>
           </div>
 
+          <ModuleBulkBar
+            visible={selectedIds.size > 0}
+            selectedCount={selectedIds.size}
+            pageCount={pageItems.length}
+            allSelected={allPageSelected}
+            exportLabel="Export selected"
+            showSelectAll={false}
+            onToggleAllPage={toggleAllOnPage}
+            onExport={requestBulkExport}
+            onClear={() => setSelectedIds(new Set())}
+          />
+
+          <SingleExportModal
+            open={!!exportModule}
+            doc={moduleExportDoc}
+            contentsLoading={exportContentsLoading}
+            detailsLabel="Module Details"
+            detailsHint="Includes description and linked identifiers."
+            icon={
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="4" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
+                <rect x="14" y="4" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
+                <rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
+                <rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.75" />
+              </svg>
+            }
+            onClose={() => setExportModule(null)}
+            onExport={(format, includeDetails) =>
+              moduleExportDoc ? exportRecord(format, moduleExportDoc, { includeDetails }) : undefined
+            }
+          />
+
           <div className="min-h-0 flex-1 overflow-auto">
             {viewMode === "list" ? (
               <table className="tb-table">
+                <colgroup>
+                  <col className="tb-col-name" />
+                  <col className="tb-col-ado" />
+                  <col className="tb-col-date" />
+                  <col className="tb-col-actions" />
+                </colgroup>
                 <thead>
                   <tr>
                     <th className="tb-table-col tb-table-col-name">
-                      <span className="tb-table-name-head">Name</span>
+                      <span className="tb-table-name-head">
+                        <input
+                          type="checkbox"
+                          className="tb-name-check"
+                          checked={allPageSelected}
+                          onChange={(e) => toggleAllOnPage(e.target.checked)}
+                          aria-label="Select all modules on this page"
+                        />
+                        Name
+                      </span>
                     </th>
                     <th className="tb-table-col tb-table-col-ado">Description</th>
                     <th className="tb-table-col-date">Created on</th>
@@ -557,9 +762,16 @@ export function ProjectModulesPanel({
                     </tr>
                   )}
                   {pageItems.map((mod) => (
-                    <tr key={mod.id}>
+                    <tr key={mod.id} className={selectedIds.has(mod.id) ? "is-selected" : undefined}>
                       <td className="tb-table-col tb-table-col-name">
                         <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            className="tb-name-check"
+                            checked={selectedIds.has(mod.id)}
+                            onChange={(e) => toggleModule(mod.id, e.target.checked)}
+                            aria-label={`Select ${mod.name}`}
+                          />
                           <div className="tb-folder-chip grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]">
                             <ModuleIcon />
                           </div>
@@ -589,6 +801,7 @@ export function ProjectModulesPanel({
                             canManage={canManage}
                             deleting={!!deleting}
                             onEdit={() => openEdit(mod)}
+                            onExport={() => setExportModule(mod)}
                             onDelete={() => setDeleteTarget(mod)}
                           />
                         </div>
@@ -598,14 +811,33 @@ export function ProjectModulesPanel({
                 </tbody>
               </table>
             ) : (
-              <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="p-4">
+                {pageItems.length > 0 && (
+                  <div className="tb-mod-grid-head">
+                    <label className="tb-mod-grid-select-all">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-[var(--accent)]"
+                        checked={allPageSelected}
+                        onChange={(e) => toggleAllOnPage(e.target.checked)}
+                        aria-label="Select all modules on this page"
+                      />
+                      Select all on this page
+                    </label>
+                    <span className="tb-mod-grid-head-count">{pageItems.length} shown</span>
+                  </div>
+                )}
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {pageItems.length === 0 && (
                   <p className="col-span-full py-8 text-center text-sm text-[var(--muted)]">
                     No modules yet.
                   </p>
                 )}
                 {pageItems.map((mod) => (
-                  <div key={mod.id} className="tb-project-card">
+                  <div
+                    key={mod.id}
+                    className={`tb-project-card ${selectedIds.has(mod.id) ? "is-selected" : ""}`}
+                  >
                     <div className="absolute right-2 top-2">
                       <KebabMenu
                         module={mod}
@@ -613,23 +845,35 @@ export function ProjectModulesPanel({
                         canManage={canManage}
                         deleting={!!deleting}
                         onEdit={() => openEdit(mod)}
+                        onExport={() => setExportModule(mod)}
                         onDelete={() => setDeleteTarget(mod)}
                       />
                     </div>
-                    <div className="tb-folder-chip mb-3 grid h-10 w-10 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]">
-                      <ModuleIcon />
+                    <div className="mb-3 flex items-center gap-2.5 pr-8">
+                      <input
+                        type="checkbox"
+                        className="tb-name-check"
+                        checked={selectedIds.has(mod.id)}
+                        onChange={(e) => toggleModule(mod.id, e.target.checked)}
+                        aria-label={`Select ${mod.name}`}
+                      />
+                      <div className="tb-folder-chip grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]">
+                        <ModuleIcon />
+                      </div>
+                      <Link
+                        to={`/projects/${projectId}/modules/${mod.id}`}
+                        className="min-w-0 flex-1 truncate font-semibold text-[var(--accent)] hover:underline"
+                        title={mod.name}
+                      >
+                        {mod.name}
+                      </Link>
                     </div>
-                    <Link
-                      to={`/projects/${projectId}/modules/${mod.id}`}
-                      className="block pr-8 font-semibold text-[var(--accent)] hover:underline"
-                    >
-                      {mod.name}
-                    </Link>
-                    <p className="mt-2 line-clamp-2 text-xs text-[var(--muted)]">
+                    <p className="line-clamp-2 text-xs text-[var(--muted)]">
                       {mod.description || "No description"}
                     </p>
                   </div>
                 ))}
+                </div>
               </div>
             )}
           </div>
