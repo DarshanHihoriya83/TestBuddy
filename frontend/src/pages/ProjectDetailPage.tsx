@@ -164,7 +164,7 @@ export function ProjectDetailPage() {
                       className="tb-btn-primary inline-flex items-center gap-1.5 text-sm"
                       onClick={() => setCreateModuleOpen(true)}
                     >
-                      <span aria-hidden>+</span> Add Module
+                      <span aria-hidden>+</span> Create Module
                     </button>
                   )}
                 </>

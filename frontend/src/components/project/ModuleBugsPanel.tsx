@@ -1,13 +1,18 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
+import { deleteBug } from "../../api";
 import type { Bug, BugPriority, BugStatus, User } from "../../types";
 import {
   defaultBugPrefs,
   tableDensityClass,
   type ModuleViewPrefs,
 } from "../../utils/moduleViewPrefs";
-import { assignableUsers } from "../../utils/roles";
+import { notifyError, notifySuccess } from "../../utils/notify";
+import { assignableUsers, canDeleteBug, canFullEditBug } from "../../utils/roles";
+import { queryKeys } from "../../queryKeys";
+import { EditBugModal } from "../EditBugModal";
 import { ModuleBulkBar } from "./ModuleBulkBar";
 import { ModuleFilterChips, type FilterChip } from "./ModuleFilterChips";
 import { ModuleStatLine, type StatItem } from "./ModuleStatLine";
@@ -36,6 +41,20 @@ function initials(name: string) {
   return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase();
 }
 
+function BugIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.75" />
+      <path
+        d="M12 3v3M12 21v-3M6 12H3M21 12h-3M6.2 6.2l2.1 2.1M15.7 15.7l2.1 2.1M17.8 6.2l-2.1 2.1M8.3 15.7l-2.1 2.1"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 /** Map domain status → mock display groups */
 function displayStatus(status: BugStatus): "Open" | "In Progress" | "Resolved" | "Closed" {
   if (status === "IN_PROGRESS") return "In Progress";
@@ -60,32 +79,15 @@ function statusPillClass(label: ReturnType<typeof displayStatus>) {
 function PriorityCell({ priority }: { priority: BugPriority }) {
   if (priority === "HIGH" || priority === "CRITICAL") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--danger)]">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path d="m12 5 7 12H5L12 5Z" fill="currentColor" />
-        </svg>
+      <span className="text-sm font-medium text-[var(--danger)]">
         {priority === "CRITICAL" ? "Critical" : "High"}
       </span>
     );
   }
   if (priority === "MEDIUM") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-600">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path d="M5 12h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-        </svg>
-        Medium
-      </span>
-    );
+    return <span className="text-sm font-medium text-amber-600">Medium</span>;
   }
-  return (
-    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--success)]">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-        <path d="m12 19 7-12H5l7 12Z" fill="currentColor" />
-      </svg>
-      Low
-    </span>
-  );
+  return <span className="text-sm font-medium text-[var(--success)]">Low</span>;
 }
 
 function SearchIcon() {
@@ -125,13 +127,51 @@ function MenuExportIcon() {
   );
 }
 
+function MenuEditIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3Z"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinejoin="round"
+      />
+      <path d="m13.5 6.5 3 3" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MenuDeleteIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function BugKebab({
+  canEdit,
+  canDelete,
+  deleting,
   onView,
+  onEdit,
   onExport,
+  onDelete,
   exportBusy,
 }: {
+  canEdit: boolean;
+  canDelete: boolean;
+  deleting?: boolean;
   onView: () => void;
+  onEdit: () => void;
   onExport: () => void;
+  onDelete: () => void;
   exportBusy?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -146,12 +186,14 @@ function BugKebab({
     }
     const rect = btnRef.current.getBoundingClientRect();
     const menuW = 160;
-    const menuH = 96;
+    let menuH = 48;
+    if (canEdit) menuH += 88;
+    if (canDelete) menuH += 48;
     const gap = 4;
     const openUp = rect.bottom + gap + menuH > window.innerHeight - 8;
     const left = Math.min(Math.max(8, rect.right - menuW), window.innerWidth - menuW - 8);
     setPos({ top: openUp ? rect.top - gap - menuH : rect.bottom + gap, left });
-  }, [open]);
+  }, [open, canEdit, canDelete]);
 
   useEffect(() => {
     if (!open) return;
@@ -198,6 +240,38 @@ function BugKebab({
               <MenuExportIcon />
               Export
             </button>
+            {canEdit && (
+              <button
+                type="button"
+                role="menuitem"
+                className="tb-menu-item"
+                onClick={() => {
+                  setOpen(false);
+                  onEdit();
+                }}
+              >
+                <MenuEditIcon />
+                Edit
+              </button>
+            )}
+            {canDelete && (
+              <>
+                <hr className="tb-menu-divider" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={deleting}
+                  className="tb-menu-item-danger"
+                  onClick={() => {
+                    setOpen(false);
+                    onDelete();
+                  }}
+                >
+                  <MenuDeleteIcon />
+                  Delete
+                </button>
+              </>
+            )}
           </div>,
           document.body,
         )
@@ -276,10 +350,26 @@ export function ModuleBugsPanel({
   const [filterAssignee, setFilterAssignee] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [deleteTarget, setDeleteTarget] = useState<Bug | null>(null);
+  const [editBug, setEditBug] = useState<Bug | null>(null);
   const col = (key: string) => viewPrefs.columns[key] !== false;
   const isGrid = viewPrefs.viewMode === "grid";
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const canEdit = canFullEditBug(user);
+  const canDelete = canDeleteBug(user);
   const assigneeChoices = useMemo(() => assignableUsers(user, users), [user, users]);
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteBug,
+    onSuccess: async () => {
+      notifySuccess("Bug deleted");
+      setDeleteTarget(null);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.bugs({ projectId, moduleId }) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.bugs({ projectId }) });
+    },
+    onError: (err: Error) => notifyError(err.message || "Could not delete bug"),
+  });
 
   const nameOf = (uid: string) => users.find((u) => u.id === uid)?.name ?? uid.slice(0, 8);
 
@@ -534,7 +624,7 @@ export function ModuleBugsPanel({
                   style={{ animationDelay: `${i * 35}ms` }}
                 >
                   <div className={`tb-qa-card-ribbon ${statusPillClass(label)}`} aria-hidden />
-                  <div className="tb-qa-card-top">
+                  <div className="tb-qa-card-top tb-qa-card-top-identity">
                     <input
                       type="checkbox"
                       className="h-4 w-4 shrink-0 accent-[var(--accent)]"
@@ -542,31 +632,42 @@ export function ModuleBugsPanel({
                       onChange={(e) => onToggleOne(bug.id, e.target.checked)}
                       aria-label={`Select ${bug.title}`}
                     />
+                    <span className="tb-folder-chip grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]" aria-hidden>
+                      <BugIcon />
+                    </span>
+                    <div className="tb-qa-card-identity-text min-w-0 flex-1">
+                      {col("id") && (
+                        <button
+                          type="button"
+                          className="tb-qa-card-id"
+                          onClick={() => onOpenBug(bug.id)}
+                        >
+                          {bugDisplayId(bug.id)}
+                        </button>
+                      )}
+                      {col("title") && (
+                        <button
+                          type="button"
+                          className="tb-qa-card-title"
+                          title={bug.title}
+                          onClick={() => onOpenBug(bug.id)}
+                        >
+                          {bug.title}
+                        </button>
+                      )}
+                    </div>
                     <BugKebab
+                      canEdit={canEdit}
+                      canDelete={canDelete}
+                      deleting={deleteMutation.isPending}
                       onView={() => onOpenBug(bug.id)}
+                      onEdit={() => setEditBug(bug)}
                       onExport={() => onExportOne(bug.id)}
+                      onDelete={() => setDeleteTarget(bug)}
                       exportBusy={exportBusy}
                     />
                   </div>
                   <div className="tb-qa-card-body">
-                    {col("id") && (
-                      <button
-                        type="button"
-                        className="tb-qa-card-id"
-                        onClick={() => onOpenBug(bug.id)}
-                      >
-                        {bugDisplayId(bug.id)}
-                      </button>
-                    )}
-                    {col("title") && (
-                      <button
-                        type="button"
-                        className="tb-qa-card-title"
-                        onClick={() => onOpenBug(bug.id)}
-                      >
-                        {bug.title}
-                      </button>
-                    )}
                     <div className="tb-qa-card-tags">
                       {col("status") && (
                         <span className={`tb-bug-status-pill ${statusPillClass(label)}`}>{label}</span>
@@ -652,14 +753,19 @@ export function ModuleBugsPanel({
                     )}
                     {col("title") && (
                       <td>
-                        <button
-                          type="button"
-                          title={bug.title}
-                          className="block w-full max-w-full truncate text-left text-sm font-medium text-[var(--ink)] hover:text-[var(--accent)]"
-                          onClick={() => onOpenBug(bug.id)}
-                        >
-                          {bug.title}
-                        </button>
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <span className="tb-folder-chip grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]" aria-hidden>
+                            <BugIcon />
+                          </span>
+                          <button
+                            type="button"
+                            title={bug.title}
+                            className="block min-w-0 flex-1 truncate text-left text-sm font-medium text-[var(--ink)] hover:text-[var(--accent)]"
+                            onClick={() => onOpenBug(bug.id)}
+                          >
+                            {bug.title}
+                          </button>
+                        </div>
                       </td>
                     )}
                     {col("status") && (
@@ -690,8 +796,13 @@ export function ModuleBugsPanel({
                     <td className="tb-table-actions-col">
                       <div className="tb-table-actions-cell">
                         <BugKebab
+                          canEdit={canEdit}
+                          canDelete={canDelete}
+                          deleting={deleteMutation.isPending}
                           onView={() => onOpenBug(bug.id)}
+                          onEdit={() => setEditBug(bug)}
                           onExport={() => onExportOne(bug.id)}
+                          onDelete={() => setDeleteTarget(bug)}
                           exportBusy={exportBusy}
                         />
                       </div>
@@ -702,63 +813,102 @@ export function ModuleBugsPanel({
             </tbody>
           </table>
         )}
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] bg-white px-4 py-2.5">
+          <p className="text-sm text-[var(--muted)]">
+            {filtered.length === 0
+              ? "Showing 0 bugs"
+              : `Showing ${startIdx + 1} to ${endIdx} of ${filtered.length} bugs`}
+          </p>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className="tb-page-btn"
+              disabled={safePage <= 1}
+              aria-label="Previous page"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              {"\u2039"}
+            </button>
+            {pageNumbers(safePage, totalPages).map((p, i) =>
+              p === "ellipsis" ? (
+                <span key={`e-${i}`} className="px-1 text-sm text-[var(--muted)]">
+                  …
+                </span>
+              ) : (
+                <button
+                  key={p}
+                  type="button"
+                  className={`tb-page-btn ${p === safePage ? "tb-page-btn-active" : ""}`}
+                  onClick={() => setPage(p)}
+                >
+                  {p}
+                </button>
+              ),
+            )}
+            <button
+              type="button"
+              className="tb-page-btn"
+              disabled={safePage >= totalPages}
+              aria-label="Next page"
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              {"\u203A"}
+            </button>
+          </div>
+          <select
+            className="tb-filter-select"
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            aria-label="Bugs per page"
+          >
+            {PAGE_SIZE_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n} per page
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      <div className="mt-auto flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] px-4 py-2.5">
-        <p className="text-sm text-[var(--muted)]">
-          {filtered.length === 0
-            ? "Showing 0 bugs"
-            : `Showing ${startIdx + 1} to ${endIdx} of ${filtered.length} bugs`}
-        </p>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            className="tb-page-btn"
-            disabled={safePage <= 1}
-            aria-label="Previous page"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            {"\u2039"}
-          </button>
-          {pageNumbers(safePage, totalPages).map((p, i) =>
-            p === "ellipsis" ? (
-              <span key={`e-${i}`} className="px-1 text-sm text-[var(--muted)]">
-                …
-              </span>
-            ) : (
-              <button
-                key={p}
-                type="button"
-                className={`tb-page-btn ${p === safePage ? "tb-page-btn-active" : ""}`}
-                onClick={() => setPage(p)}
-              >
-                {p}
-              </button>
-            ),
-          )}
-          <button
-            type="button"
-            className="tb-page-btn"
-            disabled={safePage >= totalPages}
-            aria-label="Next page"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          >
-            {"\u203A"}
-          </button>
-        </div>
-        <select
-          className="tb-filter-select"
-          value={pageSize}
-          onChange={(e) => setPageSize(Number(e.target.value))}
-          aria-label="Bugs per page"
+      <EditBugModal
+        open={!!editBug}
+        bug={editBug}
+        users={users}
+        onClose={() => setEditBug(null)}
+      />
+
+      {deleteTarget && canDelete && (
+        <div
+          className="tb-modal-overlay"
+          onClick={(e) => e.target === e.currentTarget && !deleteMutation.isPending && setDeleteTarget(null)}
         >
-          {PAGE_SIZE_OPTIONS.map((n) => (
-            <option key={n} value={n}>
-              {n} per page
-            </option>
-          ))}
-        </select>
-      </div>
+          <div className="tb-card tb-modal-panel max-w-md p-5" role="alertdialog" aria-modal>
+            <h2 className="text-lg font-semibold text-[var(--ink)]">Delete bug?</h2>
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              Delete <strong className="text-[var(--ink)]">{deleteTarget.title}</strong>? This cannot be undone.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="tb-btn-ghost"
+                disabled={deleteMutation.isPending}
+                onClick={() => setDeleteTarget(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center rounded-xl border border-red-200 bg-[var(--danger)] px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-55"
+                disabled={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate(deleteTarget.id)}
+              >
+                {deleteMutation.isPending ? "Deleting\u2026" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

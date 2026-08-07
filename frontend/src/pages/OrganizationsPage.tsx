@@ -576,10 +576,8 @@ export function OrganizationsPage() {
                   ))}
                 </div>
               )}
-            </div>
 
             {filtered.length > 0 && (
-              <div className="shrink-0">
                 <Pagination
                   page={safePage}
                   pageSize={pageSize}
@@ -591,8 +589,8 @@ export function OrganizationsPage() {
                   onPage={setPage}
                   onPageSize={setPageSize}
                 />
-              </div>
             )}
+            </div>
           </div>
         )}
       </div>

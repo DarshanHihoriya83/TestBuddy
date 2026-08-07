@@ -11,17 +11,21 @@ import {
 } from "../api";
 import { useAuth } from "../auth";
 import { CommandChip, CommandHeader, countLabel } from "../components/CommandHeader";
-import { ExportFormatModal } from "../components/ExportFormatModal";
+import { BulkExportModal } from "../components/BulkExportModal";
 import { FlashAlert } from "../components/FlashAlert";
-import { ModuleBugCard } from "../components/ModuleBugCard";
+import { BugDetailCommandHeader } from "../components/BugDetailCommandHeader";
+import { ModuleBugCard, type BugCardMode } from "../components/ModuleBugCard";
 import { ModuleBugsPanel } from "../components/project/ModuleBugsPanel";
 import { ModuleCustomizeViewModal } from "../components/project/ModuleCustomizeViewModal";
 import { ModuleTestCasesPanel } from "../components/project/ModuleTestCasesPanel";
 import { QueryStatus } from "../components/QueryStatus";
 import { Shell } from "../components/Shell";
+import type { BreadcrumbItem } from "../components/AppNavigation";
 import { queryKeys } from "../queryKeys";
 import type { Bug } from "../types";
 import { exportBugs, type ExportFormat } from "../utils/bugExport";
+import type { RecordExportFormat } from "../utils/recordExport";
+import { notifyError, notifySuccess } from "../utils/notify";
 import {
   loadModuleViewPrefs,
   saveModuleViewPrefs,
@@ -37,6 +41,10 @@ import {
 } from "../utils/roles";
 
 type ModuleTab = "bugs" | "testcases";
+
+function breadcrumbLabel(text: string, max = 52) {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
 
 function CustomizeIcon() {
   return (
@@ -118,6 +126,7 @@ export function ModuleDetailPage() {
   const [bugViewPrefs, setBugViewPrefs] = useState<ModuleViewPrefs>(() => loadModuleViewPrefs("bugs"));
   const [tcViewPrefs, setTcViewPrefs] = useState<ModuleViewPrefs>(() => loadModuleViewPrefs("testcases"));
   const [openBugId, setOpenBugId] = useState<string | null>(null);
+  const [bugCardMode, setBugCardMode] = useState<BugCardMode>("view");
   const [selectedBugIds, setSelectedBugIds] = useState<Set<string>>(() => new Set());
   const [selectedTcIds, setSelectedTcIds] = useState<Set<string>>(() => new Set());
   const [bugSearch, setBugSearch] = useState("");
@@ -180,6 +189,13 @@ export function ModuleDetailPage() {
       setOpenBugId(null);
     }
   }, [openBugId, bugs, bugsQuery.isSuccess]);
+
+  useEffect(() => {
+    setBugCardMode("view");
+  }, [openBugId]);
+
+  const editingBug = Boolean(openBug && (bugCardMode === "steps" || bugCardMode === "fields"));
+  const modulePath = `/projects/${projectId}/modules/${moduleId}`;
 
   useEffect(() => {
     setSelectedBugIds((prev) => {
@@ -281,71 +297,82 @@ export function ModuleDetailPage() {
     setExportOpen(true);
   }
 
-  async function onExportFormat(format: ExportFormat) {
+  async function onExportFormat(format: RecordExportFormat, includeDetails: boolean) {
     const ids = exportTargetIds ?? [...selectedBugIds];
     const list = bugsToExport(ids);
     if (!list.length) {
       setExportError(true);
       setExportMsg("No bugs selected to export");
+      notifyError("No bugs selected to export");
       return;
     }
     setExportBusy(true);
     setExportMsg(null);
     setExportError(false);
     try {
-      await exportBugs(
-        format,
-        list.map((bug) => ({
-          bug,
-          projectName,
-          cycleName: cycleLabel(bug.cycleId),
-          assigneeName: nameOf(bug.assigneeId),
-          reporterName: nameOf(bug.reporterId),
-        })),
-      );
-      const label = format === "excel" ? "Excel" : "PDF";
+      if (format === "json") {
+        const payload = {
+          exportedAt: new Date().toISOString(),
+          count: list.length,
+          bugs: list.map((bug) => {
+            const base = {
+              id: bug.id,
+              title: bug.title,
+              status: bug.status,
+              priority: bug.priority,
+              severity: bug.severity,
+              cycle: cycleLabel(bug.cycleId),
+              assignee: nameOf(bug.assigneeId),
+              reporter: nameOf(bug.reporterId),
+              project: projectName,
+              moduleId: bug.moduleId,
+              createdAt: bug.createdAt,
+              updatedAt: bug.updatedAt,
+            };
+            if (!includeDetails) return base;
+            return {
+              ...base,
+              description: bug.description,
+              steps: bug.steps,
+              screenshots: bug.screenshots,
+              externalRefs: bug.externalRefs,
+            };
+          }),
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `testbuddy-bugs-${list.length}-items.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        await exportBugs(
+          format as ExportFormat,
+          list.map((bug) => ({
+            bug,
+            projectName,
+            cycleName: cycleLabel(bug.cycleId),
+            assigneeName: nameOf(bug.assigneeId),
+            reporterName: nameOf(bug.reporterId),
+          })),
+        );
+      }
+      const label = format.toUpperCase();
       setExportMsg(
-        `${label} downloaded — ${list.length} bug${list.length === 1 ? "" : "s"} + screenshots`,
+        `${label} downloaded — ${list.length} bug${list.length === 1 ? "" : "s"}`,
       );
+      notifySuccess(`Exported ${list.length} bug${list.length === 1 ? "" : "s"} as ${label}`);
       setExportOpen(false);
       setExportTargetIds(null);
     } catch (err) {
       setExportError(true);
       setExportMsg(err instanceof Error ? err.message : "Export failed");
+      notifyError(err instanceof Error ? err.message : "Export failed");
     } finally {
       setExportBusy(false);
     }
   }
-
-  function exportTestCasesJson(ids?: string[]) {
-    const idList = ids?.length
-      ? ids
-      : selectedTcIds.size
-        ? [...selectedTcIds]
-        : testCases.map((t) => t.id);
-    const list = testCases.filter((t) => idList.includes(t.id));
-    if (!list.length) {
-      setExportError(true);
-      setExportMsg("No test cases to export");
-      return;
-    }
-    const blob = new Blob([JSON.stringify({ count: list.length, testCases: list }, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `testbuddy-testcases-${moduleId.slice(0, 8)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setExportMsg(`JSON downloaded — ${list.length} test case${list.length === 1 ? "" : "s"}`);
-    setExportError(false);
-  }
-
-  const exportModalTitle =
-    (exportTargetIds?.length ?? selectedBugIds.size) === 1
-      ? bugsToExport(exportTargetIds ?? [...selectedBugIds])[0]?.title ?? "Bug"
-      : `${exportTargetIds?.length ?? selectedBugIds.size} selected bugs`;
 
   const activeViewPrefs = tab === "bugs" ? bugViewPrefs : tcViewPrefs;
 
@@ -373,9 +400,40 @@ export function ModuleDetailPage() {
 
   return (
     <Shell
-      title={mod?.name ?? "Module"}
+      title={
+        editingBug
+          ? "Edit"
+          : openBug
+            ? breadcrumbLabel(openBug.title)
+            : (mod?.name ?? "Module")
+      }
       crumbRoot={{ label: "Projects", to: "/projects" }}
-      crumbs={[{ label: projectName, to: `/projects/${projectId}` }]}
+      crumbs={
+        [
+          { label: projectName, to: `/projects/${projectId}` },
+          ...(mod && openBug
+            ? [
+                {
+                  label: mod.name,
+                  to: modulePath,
+                  onClick: () => {
+                    setBugCardMode("view");
+                    setOpenBugId(null);
+                  },
+                } satisfies BreadcrumbItem,
+              ]
+            : []),
+          ...(mod && openBug && editingBug
+            ? [
+                {
+                  label: breadcrumbLabel(openBug.title),
+                  to: modulePath,
+                  onClick: () => setBugCardMode("view"),
+                } satisfies BreadcrumbItem,
+              ]
+            : []),
+        ] satisfies BreadcrumbItem[]
+      }
     >
       <QueryStatus
         isLoading={loading}
@@ -397,23 +455,31 @@ export function ModuleDetailPage() {
       )}
 
       {mod && openBug && (
-        <div className="flex h-full min-h-0 flex-col overflow-hidden">
-          <div className="mb-3 flex shrink-0 flex-wrap items-start justify-between gap-3 px-1 sm:px-0">
-            <div className="min-w-0">
-              <h1 className="text-xl font-bold tracking-tight text-[var(--ink)] sm:text-2xl">
-                {mod.name}
-              </h1>
-              <p className="mt-0.5 text-sm text-[var(--muted)]">Viewing bug details for this module.</p>
-            </div>
-            <button
-              type="button"
-              className="tb-btn-ghost inline-flex shrink-0 items-center gap-1.5 text-sm shadow-sm"
-              onClick={() => setOpenBugId(null)}
-            >
-              {"\u2190"} Back to module bugs
-            </button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-auto">
+        <div className="tb-mod-workspace flex h-full min-h-0 flex-col overflow-hidden">
+          {bugCardMode === "view" ? (
+            <BugDetailCommandHeader
+              bug={openBug}
+              actions={
+                <button
+                  type="button"
+                  className="tb-btn-ghost inline-flex items-center gap-1.5 text-sm"
+                  onClick={() => setOpenBugId(null)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M15 18 9 12l6-6"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  Back
+                </button>
+              }
+            />
+          ) : null}
+          <div className={`min-h-0 flex-1 overflow-auto pb-4 ${bugCardMode === "view" ? "pt-3" : "pt-1"}`}>
             <ModuleBugCard
               key={`${openBug.id}-${openBug.updatedAt}`}
               bug={openBug}
@@ -430,10 +496,9 @@ export function ModuleDetailPage() {
               canComment={canComment}
               canDelete={canDelete}
               onSaved={refreshBugs}
-              onDeleted={() => {
-                setOpenBugId(null);
-                refreshBugs();
-              }}
+              compactHero
+              requestedMode={bugCardMode}
+              onModeChange={setBugCardMode}
             />
           </div>
         </div>
@@ -597,7 +662,6 @@ export function ModuleDetailPage() {
                   selectedIds={selectedTcIds}
                   onToggleOne={toggleTc}
                   onToggleAll={toggleAllTc}
-                  onExportSelected={() => exportTestCasesJson([...selectedTcIds])}
                   onClearSelection={() => setSelectedTcIds(new Set())}
                   createOpen={tcCreateOpen}
                   onCreateOpenChange={setTcCreateOpen}
@@ -619,17 +683,20 @@ export function ModuleDetailPage() {
         onApply={applyViewPrefs}
       />
 
-      <ExportFormatModal
+      <BulkExportModal
         open={exportOpen}
-        busy={exportBusy}
-        bugTitle={exportModalTitle}
+        entityPlural="Bugs"
+        entitySingular="Bug"
+        selectedCount={exportTargetIds?.length ?? selectedBugIds.size}
+        detailsLabel="Bug Details"
+        detailsHint="Includes description, steps, attachments and identifiers."
         onClose={() => {
           if (!exportBusy) {
             setExportOpen(false);
             setExportTargetIds(null);
           }
         }}
-        onSelect={(format) => void onExportFormat(format)}
+        onExport={onExportFormat}
       />
     </Shell>
   );

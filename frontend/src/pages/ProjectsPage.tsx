@@ -14,8 +14,6 @@ import {
 
   useState,
 
-  type ChangeEvent,
-
   type FormEvent,
 
 } from "react";
@@ -54,9 +52,13 @@ import { CommandChip, CommandHeader, countLabel } from "../components/CommandHea
 
 import { ModuleBulkBar } from "../components/project/ModuleBulkBar";
 
+import { BulkExportModal } from "../components/BulkExportModal";
+
+import { ImportProjectModal, type ImportProjectEntry } from "../components/ImportProjectModal";
+
 import { SingleExportModal } from "../components/SingleExportModal";
 
-import { exportRecord, type ExportRecordDoc } from "../utils/recordExport";
+import { exportRecord, exportRecords, type ExportRecordDoc, type RecordExportFormat } from "../utils/recordExport";
 
 import { QueryStatus } from "../components/QueryStatus";
 
@@ -638,49 +640,9 @@ function ImportIcon() {
 
 }
 
-/** Accepts a TestBuddy export ({projects:[?]} / {project:{?}}), a bare array or a single project. */
-
-function readImportedProjects(raw: unknown): Record<string, unknown>[] {
-
-  const isProjectLike = (value: unknown): value is Record<string, unknown> =>
-
-    !!value && typeof value === "object" && !Array.isArray(value);
-
-  if (Array.isArray(raw)) return raw.filter(isProjectLike);
-
-  if (!isProjectLike(raw)) return [];
-
-  if (Array.isArray(raw.projects)) return raw.projects.filter(isProjectLike);
-
-  if (isProjectLike(raw.project)) return [raw.project];
-
-  if (typeof raw.name === "string") return [raw];
-
-  return [];
-
-}
-
 function optionalText(value: unknown) {
 
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
-
-}
-
-function downloadJson(filename: string, data: unknown) {
-
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-
-  a.href = url;
-
-  a.download = filename;
-
-  a.click();
-
-  URL.revokeObjectURL(url);
 
 }
 
@@ -996,7 +958,9 @@ export function ProjectsPage() {
 
   const [exportProject, setExportProject] = useState<Project | null>(null);
 
-  const importInputRef = useRef<HTMLInputElement>(null);
+  const [bulkExportOpen, setBulkExportOpen] = useState(false);
+
+  const [importOpen, setImportOpen] = useState(false);
 
   const orgs = orgsQuery.data ?? [];
 
@@ -1392,13 +1356,7 @@ export function ProjectsPage() {
 
 
 
-  async function handleImportFile(e: ChangeEvent<HTMLInputElement>) {
-
-    const file = e.target.files?.[0];
-
-    e.target.value = "";
-
-    if (!file) return;
+  async function runImportEntries(entries: ImportProjectEntry[]) {
 
     if (atLimit) {
 
@@ -1426,23 +1384,27 @@ export function ProjectsPage() {
 
     }
 
+    if (!entries.length) {
+
+      notifyError("No projects found in this file");
+
+      return;
+
+    }
+
     setImporting(true);
 
     try {
 
-      const entries = readImportedProjects(JSON.parse(await file.text()));
-
-      if (!entries.length) {
-
-        notifyError("No projects found in this file");
-
-        return;
-
-      }
-
       let imported = 0;
 
       const failures: string[] = [];
+
+      const existingKeys = new Set(
+
+        (projectsQuery.data ?? []).map((p) => normalizeProjectName(p.name).toLowerCase()).filter(Boolean),
+
+      );
 
       for (const entry of entries) {
 
@@ -1455,6 +1417,14 @@ export function ProjectsPage() {
         if (nameErr) {
 
           failures.push(`${rawName || "Unnamed project"}: ${nameErr}`);
+
+          continue;
+
+        }
+
+        if (existingKeys.has(name.toLowerCase())) {
+
+          failures.push(`${name}: project already exists`);
 
           continue;
 
@@ -1488,6 +1458,8 @@ export function ProjectsPage() {
 
           imported += 1;
 
+          existingKeys.add(name.toLowerCase());
+
         } catch (err) {
 
           failures.push(`${name}: ${(err as Error).message}`);
@@ -1510,6 +1482,8 @@ export function ProjectsPage() {
 
         await queryClient.invalidateQueries({ queryKey: queryKeys.projectQuota });
 
+        setImportOpen(false);
+
       }
 
       if (failures.length > 0) {
@@ -1524,7 +1498,7 @@ export function ProjectsPage() {
 
     } catch {
 
-      notifyError("Could not read this file. Pick a TestBuddy project export (.json).");
+      notifyError("Could not import projects from this file.");
 
     } finally {
 
@@ -1550,25 +1524,91 @@ export function ProjectsPage() {
 
     }
 
-    exportSelectedProjects();
+    if (selectedIds.size > 1) setBulkExportOpen(true);
 
   }
 
-  function exportSelectedProjects() {
+  function buildProjectExportDoc(project: Project): ExportRecordDoc {
+
+    return {
+
+      entity: "Project",
+
+      displayId: project.name,
+
+      title: project.name,
+
+      context: project.organizationId
+
+        ? `Organization: ${orgNameById.get(project.organizationId) ?? "\u2014"}`
+
+        : undefined,
+
+      summary: [
+
+        { label: "Name", value: project.name },
+
+        {
+
+          label: "Organization",
+
+          value: project.organizationId
+
+            ? orgNameById.get(project.organizationId) ?? "\u2014"
+
+            : "\u2014",
+
+        },
+
+        { label: "Created On", value: formatDate(project.createdAt) },
+
+      ],
+
+      details: [
+
+        { label: "Description", value: project.description?.trim() || "\u2014" },
+
+        { label: "Jira Project Key", value: project.jiraProjectKey || "\u2014" },
+
+        { label: "Azure DevOps Org URL", value: project.adoOrgUrl || "\u2014" },
+
+        { label: "Azure DevOps Project", value: project.adoProject || "\u2014" },
+
+        { label: "Project ID", value: project.id },
+
+      ],
+
+    };
+
+  }
+
+  async function runBulkProjectExport(format: RecordExportFormat, includeDetails: boolean) {
 
     const list = (projectsQuery.data ?? []).filter((p) => selectedIds.has(p.id));
 
-    if (!list.length) return;
+    if (!list.length) {
 
-    downloadJson(`testbuddy-projects-${list.length}.json`, {
+      notifyError("No projects selected to export");
 
-      exportedAt: new Date().toISOString(),
+      return;
 
-      count: list.length,
+    }
 
-      projects: list,
+    await exportRecords(
 
-    });
+      format,
+
+      list.map(buildProjectExportDoc),
+
+      { includeDetails },
+
+    );
+
+    notifySuccess(
+
+      `Exported ${list.length} project${list.length === 1 ? "" : "s"} as ${format.toUpperCase()}`,
+
+    );
 
   }
 
@@ -1756,7 +1796,7 @@ export function ProjectsPage() {
 
                 className="tb-btn-ghost inline-flex items-center justify-center gap-1.5 text-sm"
 
-                onClick={() => importInputRef.current?.click()}
+                onClick={() => setImportOpen(true)}
 
                 disabled={importing}
 
@@ -1768,20 +1808,6 @@ export function ProjectsPage() {
 
               </button>
 
-              <input
-
-                ref={importInputRef}
-
-                type="file"
-
-                accept="application/json,.json"
-
-                className="hidden"
-
-                onChange={handleImportFile}
-
-              />
-
             </div>
 
           ) : null
@@ -1789,6 +1815,24 @@ export function ProjectsPage() {
         }
 
       />
+
+      {canManage && (
+
+        <ImportProjectModal
+
+          open={importOpen}
+
+          onClose={() => setImportOpen(false)}
+
+          importing={importing}
+
+          existingProjectNames={(projectsQuery.data ?? []).map((p) => p.name)}
+
+          onImport={runImportEntries}
+
+        />
+
+      )}
 
       {createOpen && canManage && (
 
@@ -1836,7 +1880,7 @@ export function ProjectsPage() {
 
                         Org quota: {orgUsed}/{orgCap} projects
 
-                        {orgAtLimit ? " · full" : ` · ${Math.max(0, orgCap - orgUsed)} left`}
+                        {orgAtLimit ? " ? full" : ` ? ${Math.max(0, orgCap - orgUsed)} left`}
 
                       </p>
 
@@ -2534,6 +2578,26 @@ export function ProjectsPage() {
 
           />
 
+          <BulkExportModal
+
+            open={bulkExportOpen}
+
+            entityPlural="Projects"
+
+            entitySingular="Project"
+
+            selectedCount={selectedIds.size}
+
+            detailsLabel="Project Details"
+
+            detailsHint="Includes description, integrations and identifiers for each project."
+
+            onClose={() => setBulkExportOpen(false)}
+
+            onExport={runBulkProjectExport}
+
+          />
+
           <div className="min-h-0 flex-1 overflow-auto">
 
           {viewMode === "list" ? (
@@ -2872,9 +2936,7 @@ export function ProjectsPage() {
 
           )}
 
-          </div>
-
-          <div className="mt-auto flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] bg-white px-4 py-2.5 sm:px-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] bg-white px-4 py-2.5 sm:px-5">
 
             <p className="text-sm text-[var(--muted)]">
 
@@ -2963,6 +3025,8 @@ export function ProjectsPage() {
               />
 
             </div>
+
+          </div>
 
           </div>
 

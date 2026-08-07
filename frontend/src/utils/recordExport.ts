@@ -210,3 +210,149 @@ export async function exportRecord(
   if (format === "excel") return exportAsExcel(doc, includeDetails);
   return exportAsPdf(doc, includeDetails);
 }
+
+function bulkFileBase(entity: string, count: number) {
+  return `TestBuddy-${slug(entity, 24)}-${count}-items-${stamp()}`;
+}
+
+/** Export many records as one Excel / JSON / PDF file. */
+export async function exportRecords(
+  format: RecordExportFormat,
+  docs: ExportRecordDoc[],
+  { includeDetails = true }: { includeDetails?: boolean } = {},
+) {
+  if (!docs.length) throw new Error("No items selected to export");
+  if (docs.length === 1) return exportRecord(format, docs[0]!, { includeDetails });
+
+  const entity = docs[0]!.entity;
+  const plural = entity.endsWith("s") ? entity : `${entity}s`;
+
+  if (format === "json") {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      entity: plural,
+      count: docs.length,
+      items: docs.map((doc) => {
+        const { fields, sections } = resolveParts(doc, includeDetails);
+        return {
+          id: doc.displayId,
+          title: doc.title,
+          context: doc.context ?? null,
+          ...(doc.contents?.length
+            ? { contents: Object.fromEntries(doc.contents.map((c) => [c.label, c.value])) }
+            : {}),
+          fields: Object.fromEntries(fields.map((f) => [f.label, f.value])),
+          ...(sections.length
+            ? {
+                sections: sections.map((section) => ({
+                  title: section.title,
+                  rows: section.rows.map((row) =>
+                    Object.fromEntries(section.columns.map((col, i) => [col, row[i] ?? ""])),
+                  ),
+                })),
+              }
+            : {}),
+        };
+      }),
+    };
+    downloadBlob(
+      new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
+      `${bulkFileBase(plural, docs.length)}.json`,
+    );
+    return;
+  }
+
+  if (format === "excel") {
+    const mod: any = await import("exceljs");
+    const ExcelJS = mod.default ?? mod;
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "TestBuddy";
+    wb.created = new Date();
+    const sheet = wb.addWorksheet(plural.slice(0, 30));
+    const headers = ["ID", "Title", "Context", "Field", "Value"];
+    sheet.addRow(headers);
+    sheet.getRow(1).font = { bold: true };
+    for (const doc of docs) {
+      const { fields } = resolveParts(doc, includeDetails);
+      for (const f of fields) {
+        sheet.addRow([doc.displayId, doc.title, doc.context ?? "", f.label, f.value]);
+      }
+      if (includeDetails) {
+        for (const section of doc.sections ?? []) {
+          for (const row of section.rows) {
+            sheet.addRow([
+              doc.displayId,
+              doc.title,
+              section.title,
+              row[0] ?? "",
+              row.slice(1).join(" | "),
+            ]);
+          }
+        }
+      }
+    }
+    sheet.columns = [
+      { width: 16 },
+      { width: 36 },
+      { width: 22 },
+      { width: 22 },
+      { width: 50 },
+    ];
+    const buffer = await wb.xlsx.writeBuffer();
+    downloadBlob(
+      new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+      `${bulkFileBase(plural, docs.length)}.xlsx`,
+    );
+    return;
+  }
+
+  const { jsPDF } = await import("jspdf");
+  const autoTable = (await import("jspdf-autotable")).default;
+  const pdf = new jsPDF({ unit: "pt", format: "a4" });
+  const margin = 40;
+  const pageW = pdf.internal.pageSize.getWidth();
+  const contentW = pageW - margin * 2;
+
+  pdf.setFillColor(0, 120, 212);
+  pdf.rect(0, 0, pageW, 74, "F");
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(16);
+  pdf.text(`TestBuddy ${plural} Export`, margin, 32);
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(9);
+  pdf.text(`${docs.length} item(s)  ·  ${new Date().toLocaleString()}`, margin, 52);
+
+  let y = 100;
+  for (let i = 0; i < docs.length; i++) {
+    const doc = docs[i]!;
+    const { fields } = resolveParts(doc, includeDetails);
+    if (i > 0) {
+      pdf.addPage();
+      y = margin;
+    }
+    pdf.setTextColor(15, 23, 42);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(13);
+    const titleLines = pdf.splitTextToSize(`${doc.displayId} — ${doc.title}`, contentW);
+    pdf.text(titleLines, margin, y);
+    y += titleLines.length * 16 + 8;
+    autoTable(pdf, {
+      startY: y,
+      head: [["Field", "Value"]],
+      body: [
+        ...(doc.contents ?? []).map((c) => [c.label, c.value]),
+        ...fields.map((f) => [f.label, f.value]),
+      ],
+      theme: "grid",
+      tableWidth: contentW,
+      styles: { fontSize: 9, cellPadding: 5, overflow: "linebreak", valign: "top" },
+      headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: "bold" },
+      columnStyles: { 0: { cellWidth: 130, fontStyle: "bold", textColor: [71, 85, 105] } },
+      margin: { left: margin, right: margin },
+    });
+  }
+  pdf.save(`${bulkFileBase(plural, docs.length)}.pdf`);
+}

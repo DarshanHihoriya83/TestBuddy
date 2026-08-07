@@ -19,7 +19,7 @@ import { QueryStatus } from "../components/QueryStatus";
 import { Shell } from "../components/Shell";
 import { queryKeys } from "../queryKeys";
 import type { Bug, BugFilters, BugPriority, BugSeverity, BugStatus } from "../types";
-import { canCreateBug, canDeleteBug, assignableUsers } from "../utils/roles";
+import { canCreateBug, canDeleteBug } from "../utils/roles";
 
 function downloadJson(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });

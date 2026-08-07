@@ -26,7 +26,7 @@ import type { User, UserRole, UserWithTemporaryPassword } from "../types";
 import {
   assignableRoles,
   canChangeUserRole,
-  canManageRole,
+  canManageUserAccount,
   canTransferRoles,
   isAdmin,
   isSuperAdmin,
@@ -99,27 +99,33 @@ export function UsersPage() {
     [projectFilter],
   );
 
+  /** Managers must not see Super Admin accounts at all. */
+  const visibleUsers = useMemo(() => {
+    if (isSuperAdmin(me)) return allUsers;
+    return allUsers.filter((u) => u.role !== "SUPERADMIN");
+  }, [allUsers, me]);
+
   const roleCounts = useMemo(() => {
-    const map: Record<string, number> = { ALL: allUsers.length };
-    for (const u of allUsers) {
+    const map: Record<string, number> = { ALL: visibleUsers.length };
+    for (const u of visibleUsers) {
       map[u.role] = (map[u.role] || 0) + 1;
     }
     return map;
-  }, [allUsers]);
+  }, [visibleUsers]);
 
   const statusCounts = useMemo(() => {
     let active = 0;
     let inactive = 0;
-    for (const u of allUsers) {
+    for (const u of visibleUsers) {
       if (u.active === false) inactive += 1;
       else active += 1;
     }
-    return { active, inactive, all: allUsers.length };
-  }, [allUsers]);
+    return { active, inactive, all: visibleUsers.length };
+  }, [visibleUsers]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return allUsers.filter((u) => {
+    return visibleUsers.filter((u) => {
       if (roleFilter !== "ALL" && u.role !== roleFilter) return false;
       if (statusFilter === "active" && u.active === false) return false;
       if (statusFilter === "inactive" && u.active !== false) return false;
@@ -130,7 +136,7 @@ export function UsersPage() {
         u.role.toLowerCase().includes(q)
       );
     });
-  }, [allUsers, roleFilter, statusFilter, search]);
+  }, [visibleUsers, roleFilter, statusFilter, search]);
 
   const { totalPages, safePage, startIdx, endIdx, pageItems } = paginate(filtered, page, pageSize);
 
@@ -139,6 +145,12 @@ export function UsersPage() {
   useEffect(() => {
     setPage(1);
   }, [search, roleFilter, statusFilter, projectFilter, pageSize]);
+
+  useEffect(() => {
+    if (!isSuperAdmin(me) && roleFilter === "SUPERADMIN") {
+      setRoleFilter("ALL");
+    }
+  }, [me, roleFilter]);
 
   const invalidateUsers = async () => {
     await queryClient.invalidateQueries({ queryKey: ["users-admin"] });
@@ -397,7 +409,7 @@ export function UsersPage() {
               {projectFilter ? "Project members" : "Users"}
               <span className="ml-2 font-semibold text-[var(--muted)]">
                 ({filtered.length}
-                {filtered.length !== allUsers.length ? ` of ${allUsers.length}` : ""})
+                {filtered.length !== visibleUsers.length ? ` of ${visibleUsers.length}` : ""})
               </span>
             </h3>
           </div>
@@ -483,57 +495,71 @@ export function UsersPage() {
                       Change role
                     </button>
                   )}
-                  {canFullUserAdmin && (
-                    <UserActionsMenu
-                      user={u}
-                      canEdit
-                      canResetPassword={
-                        u.id !== me?.id && u.active !== false && canManageRole(me, u.role)
-                      }
-                      canChangeStatus={u.id !== me?.id && canManageRole(me, u.role)}
-                      canDeleteForever={isSuperAdmin(me) && u.id !== me?.id && u.active === false}
-                      busy={
-                        deleteMutation.isPending ||
-                        activateMutation.isPending ||
-                        hardDeleteMutation.isPending
-                      }
-                      onEdit={() => {
-                        setEditing(u);
-                        setError(null);
-                        setShowCreate(false);
-                        setRoleChangeUser(null);
-                      }}
-                      onResetPassword={() => {
-                        setResetUser(u);
-                        setError(null);
-                        setMessage(null);
-                        setShowCreate(false);
-                        setEditing(null);
-                        setRoleChangeUser(null);
-                      }}
-                      onActivate={() => {
-                        activateMutation.mutate({ id: u.id, userName: u.name });
-                      }}
-                      onDeactivate={() => {
-                        if (
-                          window.confirm(
-                            `Deactivate ${u.name}? Their existing sessions will stop working and they will no longer be able to sign in.`,
-                          )
-                        ) {
-                          deleteMutation.mutate({ id: u.id, userName: u.name });
+                  {(() => {
+                    const canManageTarget = canManageUserAccount(me, u);
+                    const canEditTarget = canFullUserAdmin && canManageTarget;
+                    const canResetTarget =
+                      canFullUserAdmin &&
+                      u.id !== me?.id &&
+                      u.active !== false &&
+                      canManageTarget;
+                    const canStatusTarget =
+                      canFullUserAdmin && u.id !== me?.id && canManageTarget;
+                    const canHardDelete =
+                      isSuperAdmin(me) && u.id !== me?.id && u.active === false;
+                    if (!canEditTarget && !canResetTarget && !canStatusTarget && !canHardDelete) {
+                      return null;
+                    }
+                    return (
+                      <UserActionsMenu
+                        user={u}
+                        canEdit={canEditTarget}
+                        canResetPassword={canResetTarget}
+                        canChangeStatus={canStatusTarget}
+                        canDeleteForever={canHardDelete}
+                        busy={
+                          deleteMutation.isPending ||
+                          activateMutation.isPending ||
+                          hardDeleteMutation.isPending
                         }
-                      }}
-                      onDeleteForever={() => {
-                        if (
-                          window.confirm(
-                            `Permanently delete ${u.name}? This cannot be undone. Bug history will keep their name as an ID only.`,
-                          )
-                        ) {
-                          hardDeleteMutation.mutate(u.id);
-                        }
-                      }}
-                    />
-                  )}
+                        onEdit={() => {
+                          setEditing(u);
+                          setError(null);
+                          setShowCreate(false);
+                          setRoleChangeUser(null);
+                        }}
+                        onResetPassword={() => {
+                          setResetUser(u);
+                          setError(null);
+                          setMessage(null);
+                          setShowCreate(false);
+                          setEditing(null);
+                          setRoleChangeUser(null);
+                        }}
+                        onActivate={() => {
+                          activateMutation.mutate({ id: u.id, userName: u.name });
+                        }}
+                        onDeactivate={() => {
+                          if (
+                            window.confirm(
+                              `Deactivate ${u.name}? Their existing sessions will stop working and they will no longer be able to sign in.`,
+                            )
+                          ) {
+                            deleteMutation.mutate({ id: u.id, userName: u.name });
+                          }
+                        }}
+                        onDeleteForever={() => {
+                          if (
+                            window.confirm(
+                              `Permanently delete ${u.name}? This cannot be undone. Bug history will keep their name as an ID only.`,
+                            )
+                          ) {
+                            hardDeleteMutation.mutate(u.id);
+                          }
+                        }}
+                      />
+                    );
+                  })()}
                 </div>
               </div>
             ))}

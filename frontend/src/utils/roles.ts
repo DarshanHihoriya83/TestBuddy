@@ -105,6 +105,19 @@ export function canChangeUserRole(
   return canManageRole(actor, target.role);
 }
 
+/**
+ * Can actor manage this user's account (edit / reset / activate)?
+ * Managers cannot manage SuperAdmin accounts at all.
+ */
+export function canManageUserAccount(
+  actor: User | null | undefined,
+  target: User | null | undefined,
+): boolean {
+  if (!actor || !target) return false;
+  if (!isAdmin(actor)) return false;
+  return canManageRole(actor, target.role);
+}
+
 /** Can actor assign work (bug/test case) to this user? SuperAdmin is never a work assignee. */
 export function canAssignWorkTo(
   actor: User | null | undefined,

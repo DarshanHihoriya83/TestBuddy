@@ -516,6 +516,7 @@ export function AppSidebar() {
 export type BreadcrumbItem = {
   label: string;
   to?: string;
+  onClick?: () => void;
 };
 
 function FolderIcon() {
@@ -573,6 +574,12 @@ export function PageBreadcrumb({
             {crumb.to ? (
               <Link
                 to={crumb.to}
+                onClick={(e) => {
+                  if (crumb.onClick) {
+                    e.preventDefault();
+                    crumb.onClick();
+                  }
+                }}
                 className="truncate rounded-lg px-1.5 py-0.5 transition hover:bg-[var(--bg0)] hover:text-[var(--ink)]"
                 title={crumb.label}
               >

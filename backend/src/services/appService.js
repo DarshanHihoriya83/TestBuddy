@@ -550,13 +550,17 @@ const USER_ROLE_ORDER = `
   END`;
 
 export async function listUsers(actor, { projectId, directory = false } = {}) {
+  // Managers (and other non–Super Admin roles) must never see Super Admin accounts.
+  const hideSuperAdmins = !isSuperAdmin(actor);
+  const excludeSuperAdminSql = hideSuperAdmins ? ` AND u.role <> 'SUPERADMIN'` : "";
+
   if (projectId) {
     await assertCanAccessProject(actor, projectId);
     const { rows } = await query(
       `SELECT u.id, u.name, u.email, u.role, u.active
        FROM users u
        INNER JOIN project_members pm ON pm.user_id = u.id
-       WHERE pm.project_id = $1
+       WHERE pm.project_id = $1${excludeSuperAdminSql}
        ORDER BY
          CASE u.role
            WHEN 'SUPERADMIN' THEN 0
@@ -574,7 +578,9 @@ export async function listUsers(actor, { projectId, directory = false } = {}) {
   // Full directory only for role-transfer callers (SuperAdmin/Manager)
   if (directory || isSuperAdmin(actor)) {
     const { rows } = await query(
-      `SELECT id, name, email, role, active FROM users ORDER BY ${USER_ROLE_ORDER}, name`,
+      hideSuperAdmins
+        ? `SELECT id, name, email, role, active FROM users WHERE role <> 'SUPERADMIN' ORDER BY ${USER_ROLE_ORDER}, name`
+        : `SELECT id, name, email, role, active FROM users ORDER BY ${USER_ROLE_ORDER}, name`,
     );
     return rows.map(toUserDto);
   }
@@ -583,7 +589,7 @@ export async function listUsers(actor, { projectId, directory = false } = {}) {
   const { rows } = await query(
     `SELECT u.id, u.name, u.email, u.role, u.active
      FROM users u
-     WHERE u.id = $1
+     WHERE (u.id = $1
         OR u.id IN (
           SELECT om2.user_id
           FROM organization_members om1
@@ -595,7 +601,7 @@ export async function listUsers(actor, { projectId, directory = false } = {}) {
           FROM project_members pm1
           JOIN project_members pm2 ON pm2.project_id = pm1.project_id
           WHERE pm1.user_id = $1
-        )
+        ))${excludeSuperAdminSql}
      ORDER BY
        CASE u.role
          WHEN 'SUPERADMIN' THEN 0

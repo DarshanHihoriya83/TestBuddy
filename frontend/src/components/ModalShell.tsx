@@ -14,6 +14,7 @@ const SIZES = {
   md: "max-w-lg",
   lg: "max-w-xl",
   xl: "max-w-3xl",
+  "2xl": "max-w-4xl",
 } as const;
 
 /** Nested dialogs must not fight over restoring body scroll. */

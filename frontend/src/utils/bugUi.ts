@@ -27,6 +27,19 @@ export function priorityTone(priority: string) {
   }
 }
 
+export function severityTone(severity: string) {
+  switch (severity) {
+    case "BLOCKER":
+      return "bg-[var(--danger-soft)] text-[var(--danger)]";
+    case "CRITICAL":
+      return "bg-orange-100 text-orange-800";
+    case "MAJOR":
+      return "bg-amber-100 text-amber-800";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
 export function statusLabel(status: string) {
   return status.replaceAll("_", " ");
 }

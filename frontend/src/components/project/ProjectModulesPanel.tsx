@@ -6,8 +6,10 @@ import { fetchBugs, fetchTestCases } from "../../api";
 import { queryKeys } from "../../queryKeys";
 import type { Module } from "../../types";
 import { ModuleBulkBar } from "./ModuleBulkBar";
+import { BulkExportModal } from "../BulkExportModal";
 import { SingleExportModal } from "../SingleExportModal";
-import { exportRecord, type ExportRecordDoc } from "../../utils/recordExport";
+import { exportRecord, exportRecords, type ExportRecordDoc, type RecordExportFormat } from "../../utils/recordExport";
+import { notifyError, notifySuccess } from "../../utils/notify";
 
 type ViewMode = "list" | "grid";
 type MenuPos = { top: number; left: number };
@@ -88,16 +90,6 @@ function MenuExportIcon() {
       />
     </svg>
   );
-}
-
-function downloadJson(filename: string, data: unknown) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 function ModuleIcon() {
@@ -433,6 +425,7 @@ export function ProjectModulesPanel({
   };
   const [editModule, setEditModule] = useState<Module | null>(null);
   const [exportModule, setExportModule] = useState<Module | null>(null);
+  const [bulkExportOpen, setBulkExportOpen] = useState(false);
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Module | null>(null);
@@ -576,17 +569,39 @@ export function ProjectModulesPanel({
         return;
       }
     }
-    exportSelectedModules();
+    if (selectedIds.size > 1) setBulkExportOpen(true);
   }
 
-  function exportSelectedModules() {
+  function buildModuleExportDoc(mod: Module): ExportRecordDoc {
+    return {
+      entity: "Module",
+      displayId: mod.name,
+      title: mod.name,
+      context: mod.description?.trim() || "Module workspace",
+      summary: [
+        { label: "Name", value: mod.name },
+        { label: "Created On", value: formatDate(mod.createdAt) },
+      ],
+      details: [
+        { label: "Description", value: mod.description?.trim() || "\u2014" },
+        { label: "Module ID", value: mod.id },
+        { label: "Project ID", value: mod.projectId },
+      ],
+    };
+  }
+
+  async function runBulkModuleExport(format: RecordExportFormat, includeDetails: boolean) {
     const list = modules.filter((m) => selectedIds.has(m.id));
-    if (!list.length) return;
-    downloadJson(`testbuddy-modules-${list.length}.json`, {
-      exportedAt: new Date().toISOString(),
-      count: list.length,
-      modules: list,
-    });
+    if (!list.length) {
+      notifyError("No modules selected to export");
+      return;
+    }
+    await exportRecords(
+      format,
+      list.map(buildModuleExportDoc),
+      { includeDetails },
+    );
+    notifySuccess(`Exported ${list.length} module${list.length === 1 ? "" : "s"} as ${format.toUpperCase()}`);
   }
 
   function openCreate() {
@@ -641,7 +656,7 @@ export function ProjectModulesPanel({
             </Link>
             {canManage && (
               <button type="button" className="tb-btn-primary shrink-0" onClick={openCreate}>
-                <span aria-hidden>+</span> Add module
+                <span aria-hidden>+</span> Create module
               </button>
             )}
           </div>
@@ -723,6 +738,17 @@ export function ProjectModulesPanel({
             onExport={(format, includeDetails) =>
               moduleExportDoc ? exportRecord(format, moduleExportDoc, { includeDetails }) : undefined
             }
+          />
+
+          <BulkExportModal
+            open={bulkExportOpen}
+            entityPlural="Modules"
+            entitySingular="Module"
+            selectedCount={selectedIds.size}
+            detailsLabel="Module Details"
+            detailsHint="Includes description and linked identifiers for each module."
+            onClose={() => setBulkExportOpen(false)}
+            onExport={runBulkModuleExport}
           />
 
           <div className="min-h-0 flex-1 overflow-auto">
@@ -876,9 +902,8 @@ export function ProjectModulesPanel({
                 </div>
               </div>
             )}
-          </div>
 
-          <div className="mt-auto flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] bg-white px-4 py-2.5 sm:px-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--line)] bg-white px-4 py-2.5 sm:px-5">
             <p className="text-sm text-[var(--muted)]">
               {total === 0
                 ? "Showing 0 modules"
@@ -924,6 +949,7 @@ export function ProjectModulesPanel({
               <PageSizeSelect value={pageSize} onChange={setPageSize} />
             </div>
           </div>
+          </div>
         </div>
       )}
 
@@ -942,7 +968,7 @@ export function ProjectModulesPanel({
           >
             <div className="flex items-start justify-between gap-3">
               <h2 id="add-module-title" className="text-lg font-semibold text-[var(--ink)]">
-                Add module
+                Create module
               </h2>
               <button
                 type="button"
@@ -989,7 +1015,7 @@ export function ProjectModulesPanel({
                   className="tb-btn-primary"
                   disabled={!moduleName.trim() || creating}
                 >
-                  {creating ? "Adding…" : "Add module"}
+                  {creating ? "Creating…" : "Create module"}
                 </button>
               </div>
             </form>
