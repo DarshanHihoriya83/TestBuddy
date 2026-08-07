@@ -2,7 +2,7 @@ import { Router } from "express";
 import * as app from "../services/appService.js";
 import { requireAuth, requireProjectCreator } from "../middleware/auth.js";
 import { badRequest, forbidden } from "../errors.js";
-import { canManageModules, canManageProjectMembers } from "../roles.js";
+import { canManageModules, canManageProjectMembers, canManageEnvironments, canManageSprints } from "../roles.js";
 
 const router = Router();
 
@@ -133,7 +133,115 @@ router.get("/cycles", requireAuth, async (req, res, next) => {
     if (!req.query.projectId) {
       throw badRequest("projectId is required");
     }
-    res.json(await app.listCycles(req.user, req.query.projectId));
+    res.json(await app.listSprints(req.user, req.query.projectId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/sprints", requireAuth, async (req, res, next) => {
+  try {
+    if (!req.query.projectId) {
+      throw badRequest("projectId is required");
+    }
+    res.json(await app.listSprints(req.user, req.query.projectId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/projects/:id/sprints", requireAuth, async (req, res, next) => {
+  try {
+    if (!canManageSprints(req.user)) throw forbidden("You cannot manage sprints");
+    res.status(201).json(await app.createSprint(req.user, req.params.id, req.body || {}));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put("/sprints/:id", requireAuth, async (req, res, next) => {
+  try {
+    if (!canManageSprints(req.user)) throw forbidden("You cannot manage sprints");
+    res.json(await app.updateSprint(req.user, req.params.id, req.body || {}));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete("/sprints/:id", requireAuth, async (req, res, next) => {
+  try {
+    if (!canManageSprints(req.user)) throw forbidden("You cannot manage sprints");
+    await app.deleteSprint(req.user, req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/projects/:id/ado/test", requireAuth, async (req, res, next) => {
+  try {
+    if (!canManageSprints(req.user)) throw forbidden("You cannot manage Azure DevOps settings");
+    res.json(await app.testProjectAdoConnection(req.user, req.params.id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/projects/:id/ado/iterations", requireAuth, async (req, res, next) => {
+  try {
+    if (!canManageSprints(req.user)) throw forbidden("You cannot manage Azure DevOps settings");
+    res.json(await app.listProjectAdoIterations(req.user, req.params.id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/projects/:id/sprints/import-ado", requireAuth, async (req, res, next) => {
+  try {
+    if (!canManageSprints(req.user)) throw forbidden("You cannot manage sprints");
+    res.status(201).json(await app.importAdoSprints(req.user, req.params.id, req.body || {}));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/projects/:id/environments", requireAuth, async (req, res, next) => {
+  try {
+    res.json(await app.listEnvironments(req.user, req.params.id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/projects/:id/environments", requireAuth, async (req, res, next) => {
+  try {
+    if (!canManageEnvironments(req.user)) {
+      throw forbidden("You cannot manage environments");
+    }
+    res.status(201).json(await app.createEnvironment(req.user, req.params.id, req.body || {}));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put("/environments/:id", requireAuth, async (req, res, next) => {
+  try {
+    if (!canManageEnvironments(req.user)) {
+      throw forbidden("You cannot manage environments");
+    }
+    res.json(await app.updateEnvironment(req.user, req.params.id, req.body || {}));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete("/environments/:id", requireAuth, async (req, res, next) => {
+  try {
+    if (!canManageEnvironments(req.user)) {
+      throw forbidden("You cannot manage environments");
+    }
+    await app.deleteEnvironment(req.user, req.params.id);
+    res.status(204).end();
   } catch (err) {
     next(err);
   }

@@ -35,6 +35,17 @@ export function canManageModules(user: User | null | undefined) {
   return r === "MANAGER" || r === "TESTER";
 }
 
+/** Project environments — SuperAdmin or Manager only. */
+export function canManageEnvironments(user: User | null | undefined) {
+  const r = user?.role;
+  return r === "SUPERADMIN" || r === "MANAGER";
+}
+
+export function canManageSprints(user: User | null | undefined) {
+  const r = user?.role;
+  return r === "SUPERADMIN" || r === "MANAGER";
+}
+
 export function canCreateBug(user: User | null | undefined) {
   const r = user?.role;
   return r === "SUPERADMIN" || r === "MANAGER" || r === "TESTER";
@@ -124,16 +135,12 @@ export function assignableUsers(
   return users.filter((u) => u.active !== false && u.role !== "SUPERADMIN");
 }
 
-/** Users that may be added as org/project members (non–SuperAdmin actors cannot pick SuperAdmin). */
+/** Users that may be added as org/project members. SuperAdmin is platform-scoped. */
 export function addableMemberUsers(
-  actor: User | null | undefined,
+  _actor: User | null | undefined,
   users: User[],
 ): User[] {
-  return users.filter((u) => {
-    if (u.active === false) return false;
-    if (u.role === "SUPERADMIN" && actor?.role !== "SUPERADMIN") return false;
-    return true;
-  });
+  return users.filter((u) => u.active !== false && u.role !== "SUPERADMIN");
 }
 
 export function roleLabel(role: string) {

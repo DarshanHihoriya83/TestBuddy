@@ -1,10 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { Project, UserRole } from "../../types";
 
 const ROLE_FILTERS: Array<{ id: "ALL" | UserRole; label: string }> = [
   { id: "ALL", label: "All roles" },
-  { id: "SUPERADMIN", label: "Super Admin" },
   { id: "MANAGER", label: "Manager" },
   { id: "DEVELOPER", label: "Developer" },
   { id: "TESTER", label: "Tester" },
@@ -57,6 +56,7 @@ export function UserFiltersBar({
   roleCounts,
   filtersDirty,
   onClear,
+  actions,
 }: {
   projects: Project[];
   projectFilter: string;
@@ -71,6 +71,8 @@ export function UserFiltersBar({
   roleCounts: Record<string, number>;
   filtersDirty: boolean;
   onClear: () => void;
+  /** Primary actions (e.g. Create user) rendered at the end of the toolbar. */
+  actions?: ReactNode;
 }) {
   const searchRef = useRef<HTMLInputElement>(null);
   const selectedProject = projects.find((p) => p.id === projectFilter);
@@ -213,6 +215,8 @@ export function UserFiltersBar({
             Reset
           </button>
         )}
+
+        {actions ? <div className="ml-auto flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
       </div>
 
       {chips.length > 0 && (

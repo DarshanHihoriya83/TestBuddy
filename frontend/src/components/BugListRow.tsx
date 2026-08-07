@@ -21,7 +21,7 @@ function initials(name: string) {
 export function BugListRow({
   bug,
   assigneeName,
-  cycleName,
+  sprintName,
   projectName,
   selected = false,
   onSelectedChange,
@@ -31,7 +31,7 @@ export function BugListRow({
 }: {
   bug: Bug;
   assigneeName: string;
-  cycleName?: string;
+  sprintName?: string;
   projectName?: string;
   selected?: boolean;
   onSelectedChange?: (bugId: string, selected: boolean) => void;
@@ -101,7 +101,9 @@ export function BugListRow({
         <span className="mt-0.5 block truncate text-[11px] text-[var(--muted)] md:hidden">
           {assigneeName} · {statusLabel(bug.status)} · {bug.priority}
         </span>
-        {actions ? <div className="mt-1.5 flex flex-wrap gap-2">{actions}</div> : null}
+        {actions ? (
+          <div className="mt-1.5 flex flex-wrap gap-2">{actions}</div>
+        ) : null}
       </div>
 
       <span className="hidden min-w-0 items-center gap-2 md:flex">
@@ -133,7 +135,7 @@ export function BugListRow({
       </span>
 
       <span className="truncate text-right text-xs text-slate-500">
-        {cycleName || projectName || "—"}
+        {sprintName || projectName || "—"}
       </span>
     </div>
   );

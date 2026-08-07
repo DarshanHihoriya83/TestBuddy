@@ -5,7 +5,7 @@ export type ExportFormat = "pdf" | "excel";
 export interface BugExportContext {
   bug: Bug;
   projectName: string;
-  cycleName: string;
+  sprintName: string;
   assigneeName: string;
   reporterName: string;
 }
@@ -163,7 +163,7 @@ function buildReadableBugReport(ctx: EnrichedContext) {
     priority: bug.priority,
     severity: bug.severity,
     project: ctx.projectName,
-    cycle: ctx.cycleName,
+    sprint: ctx.sprintName,
     assignee: ctx.assigneeName,
     reporter: ctx.reporterName,
     filedAt: when(bug.createdAt),
@@ -231,7 +231,7 @@ async function exportBugsAsExcel(contexts: EnrichedContext[]) {
     { header: "Priority", key: "priority", width: 10 },
     { header: "Severity", key: "severity", width: 10 },
     { header: "Project", key: "project", width: 20 },
-    { header: "Cycle", key: "cycle", width: 14 },
+    { header: "Sprint", key: "sprint", width: 14 },
     { header: "Assignee", key: "assignee", width: 18 },
     { header: "Reporter", key: "reporter", width: 18 },
     { header: "Filed", key: "filed", width: 20 },
@@ -291,7 +291,7 @@ async function exportBugsAsExcel(contexts: EnrichedContext[]) {
       priority: report.priority,
       severity: report.severity,
       project: report.project,
-      cycle: report.cycle,
+      sprint: report.sprint,
       assignee: report.assignee,
       reporter: report.reporter,
       filed: report.filedAt,
@@ -608,8 +608,8 @@ async function exportBugsAsPdf(contexts: EnrichedContext[]) {
         [
           "Project",
           pdfSafeText(report.project, 80),
-          "Cycle",
-          pdfSafeText(report.cycle, 40),
+          "Sprint",
+          pdfSafeText(report.sprint, 40),
         ],
         [
           "Assignee",

@@ -10,7 +10,8 @@ const results = [];
 let token = "";
 let userId = "";
 let projectId = "";
-let cycleId = "";
+let sprintId = "";
+let defaultEnvId = "";
 let assigneeId = "";
 let bugId = "";
 let createdProjectId = "";
@@ -561,19 +562,61 @@ async function testCatalog() {
   }
 
   const detail = await api(`/api/projects/${createdProjectId}`);
-  if (detail.res.ok && detail.json?.cycleCount >= 1) {
-    pass("GET /api/projects/:id", `cycles=${detail.json.cycleCount}`);
+  if (detail.res.ok && detail.json?.sprintCount >= 1) {
+    pass("GET /api/projects/:id", `cycles=${detail.json.sprintCount}`);
   } else fail("GET /api/projects/:id", detail.text);
 
-  const cycles = await api(`/api/cycles?projectId=${createdProjectId}`);
+  const cycles = await api(`/api/sprints?projectId=${createdProjectId}`);
   if (cycles.res.ok && cycles.json?.length >= 1) {
-    cycleId = cycles.json.find((c) => c.isDefault)?.id || cycles.json[0].id;
-    pass("GET /api/cycles", `${cycles.json.length} cycle(s)`);
-  } else fail("GET /api/cycles", cycles.text);
+    sprintId = cycles.json.find((c) => c.isDefault)?.id || cycles.json[0].id;
+    pass("GET /api/sprints", `${cycles.json.length} cycle(s)`);
+  } else fail("GET /api/sprints", cycles.text);
 
-  const noProject = await api("/api/cycles");
-  if (noProject.res.status === 400) pass("GET /api/cycles requires projectId");
-  else fail("GET /api/cycles requires projectId", `status ${noProject.res.status}`);
+  const noProject = await api("/api/sprints");
+  if (noProject.res.status === 400) pass("GET /api/sprints requires projectId");
+  else fail("GET /api/sprints requires projectId", `status ${noProject.res.status}`);
+
+  const sprintCreate = await api(`/api/projects/${createdProjectId}/sprints`, {
+    method: "POST",
+    body: JSON.stringify({ name: "Sprint Manual" }),
+  });
+  if (sprintCreate.res.ok && sprintCreate.json?.name === "Sprint Manual") {
+    pass("POST /api/projects/:id/sprints (Manager)");
+  } else fail("POST /api/projects/:id/sprints (Manager)", sprintCreate.text);
+
+  await loginAs("alice@testbuddy.local");
+  const testerSprintCreate = await api(`/api/projects/${createdProjectId}/sprints`, {
+    method: "POST",
+    body: JSON.stringify({ name: "Nope" }),
+  });
+  if (testerSprintCreate.res.status === 403) pass("Tester forbidden create sprint");
+  else fail("Tester forbidden create sprint", `status ${testerSprintCreate.res.status}`);
+  await loginAs("carol@testbuddy.local");
+
+  const envList = await api(`/api/projects/${createdProjectId}/environments`);
+  if (envList.res.ok && envList.json?.length >= 1) {
+    defaultEnvId =
+      envList.json.find((e) => e.isDefault && e.active)?.id || envList.json[0].id;
+    pass("GET /api/projects/:id/environments", `${envList.json.length} env(s)`);
+  } else fail("GET /api/projects/:id/environments", envList.text);
+
+  const staging = await api(`/api/projects/${createdProjectId}/environments`, {
+    method: "POST",
+    body: JSON.stringify({ name: "Staging" }),
+  });
+  if (staging.res.ok && staging.json?.name === "Staging") {
+    pass("POST /api/projects/:id/environments (Manager)");
+  } else fail("POST /api/projects/:id/environments (Manager)", staging.text);
+
+  await loginAs("alice@testbuddy.local");
+  const testerEnvCreate = await api(`/api/projects/${createdProjectId}/environments`, {
+    method: "POST",
+    body: JSON.stringify({ name: "Prod" }),
+  });
+  if (testerEnvCreate.res.status === 403) pass("Tester forbidden create environment");
+  else fail("Tester forbidden create environment", `status ${testerEnvCreate.res.status}`);
+
+  await loginAs("carol@testbuddy.local");
 
   // Manager project-create limit: fill to cap then expect 400
   const q = await api("/api/projects/quota");
@@ -983,9 +1026,9 @@ async function testOrgRbac() {
     if (stealGet.res.status === 403) pass("Tester forbidden get foreign project");
     else fail("Tester forbidden get foreign project", `status ${stealGet.res.status}`);
 
-    const stealCycles = await api(`/api/cycles?projectId=${mgrProjId}`);
-    if (stealCycles.res.status === 403) pass("Tester forbidden list foreign cycles");
-    else fail("Tester forbidden list foreign cycles", `status ${stealCycles.res.status}`);
+    const stealCycles = await api(`/api/sprints?projectId=${mgrProjId}`);
+    if (stealCycles.res.status === 403) pass("Tester forbidden list foreign sprints");
+    else fail("Tester forbidden list foreign sprints", `status ${stealCycles.res.status}`);
 
     const stealMembers = await api(`/api/projects/${mgrProjId}/members`, {
       method: "POST",
@@ -1009,7 +1052,7 @@ async function testOrgRbac() {
         priority: "LOW",
         severity: "MINOR",
         assigneeId: aliceMe.json?.id || assigneeId,
-        cycleId: crypto.randomUUID(),
+        sprintId: crypto.randomUUID(),
         projectId: mgrProjId,
         status: "NEW",
         steps: [],
@@ -1126,6 +1169,41 @@ async function testRoleTransfer() {
   });
   if (devRole.res.status === 403) pass("Developer forbidden role transfer");
   else fail("Developer forbidden role transfer", `status ${devRole.res.status}`);
+
+  await loginAs("carol@testbuddy.local");
+  const mgrDirectory = await api("/api/users/admin");
+  if (mgrDirectory.res.ok && Array.isArray(mgrDirectory.json)) {
+    pass("Manager users admin list", `${mgrDirectory.json.length} users`);
+  } else fail("Manager users admin list", mgrDirectory.text);
+
+  await loginAs("superadmin@testbuddy.local");
+  const otherOrgName = `Regression Org ${Date.now()}`;
+  const otherOrg = await api("/api/organizations", {
+    method: "POST",
+    body: JSON.stringify({ name: otherOrgName, maxProjects: 5 }),
+  });
+  let otherOrgUserId = null;
+  if (otherOrg.res.status === 201 && otherOrg.json?.id) {
+    const isolatedEmail = `isolated.user.${Date.now()}@testbuddy.local`;
+    const isolated = await api("/api/users", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Isolated Org User",
+        email: isolatedEmail,
+        role: "TESTER",
+        organizationId: otherOrg.json.id,
+      }),
+    });
+    if (isolated.res.status === 201 && isolated.json?.id) {
+      otherOrgUserId = isolated.json.id;
+      await loginAs("carol@testbuddy.local");
+      const mgrAfter = await api("/api/users/admin");
+      const seesIsolated = (mgrAfter.json || []).some((u) => u.id === otherOrgUserId);
+      if (!seesIsolated) pass("Manager directory excludes other-org users");
+      else fail("Manager directory excludes other-org users", mgrAfter.text);
+      await loginAs("superadmin@testbuddy.local");
+    } else fail("Manager directory excludes other-org users", "could not seed isolated user");
+  } else fail("Manager directory excludes other-org users", "could not seed other org");
 
   await loginAs("carol@testbuddy.local");
   const toDev = await api(`/api/users/${aliceId}`, {
@@ -1344,9 +1422,11 @@ async function testBugs() {
     priority: "MEDIUM",
     severity: "MAJOR",
     assigneeId,
-    cycleId,
+    sprintId,
     projectId: createdProjectId,
     moduleId: moduleId || undefined,
+    environmentId: defaultEnvId || undefined,
+    environmentSnapshot: "Chrome · Windows · example.com",
     status: "NEW",
     steps: [
       {
@@ -1384,11 +1464,47 @@ async function testBugs() {
   if (
     create.res.status === 201 &&
     create.json?.steps?.length === 2 &&
-    create.json?.screenshots?.length === 1
+    create.json?.screenshots?.length === 1 &&
+    create.json?.environmentId === defaultEnvId
   ) {
     bugId = create.json.id;
-    pass("POST /api/bugs (Tester)", `id=${bugId} screenshots=1`);
+    pass("POST /api/bugs (Tester)", `id=${bugId} screenshots=1 env=${defaultEnvId.slice(0, 8)}`);
   } else fail("POST /api/bugs (Tester)", create.text);
+
+  // ADO push/sync endpoints (no live ADO required — expect config / link errors)
+  if (bugId) {
+    const pushAdo = await api(`/api/bugs/${bugId}/push/ado`, {
+      method: "POST",
+      body: "{}",
+    });
+    if (pushAdo.res.status === 400 || pushAdo.res.ok) {
+      pass(
+        "POST /api/bugs/:id/push/ado",
+        pushAdo.res.ok
+          ? `ado=#${pushAdo.json?.adoWorkItemId}`
+          : `rejected without ADO: ${(pushAdo.json?.message || "").slice(0, 60)}`,
+      );
+    } else fail("POST /api/bugs/:id/push/ado", `${pushAdo.res.status} ${pushAdo.text}`);
+
+    const syncAdo = await api(`/api/bugs/${bugId}/sync/ado`, {
+      method: "POST",
+      body: "{}",
+    });
+    if (syncAdo.res.status === 400 || syncAdo.res.ok) {
+      pass(
+        "POST /api/bugs/:id/sync/ado",
+        syncAdo.res.ok
+          ? `synced #${syncAdo.json?.adoWorkItemId}`
+          : `rejected until linked: ${(syncAdo.json?.message || "").slice(0, 60)}`,
+      );
+    } else fail("POST /api/bugs/:id/sync/ado", `${syncAdo.res.status} ${syncAdo.text}`);
+
+    if (create.json?.externalRefs?.adoWorkItemId) {
+      pass("Bug DTO includes adoWorkItemId after create", create.json.externalRefs.adoWorkItemId);
+    } else {
+      pass("Bug DTO adoWorkItemId optional until ADO configured");
+    }
+  }
 
   // Developer cannot create bug
   await loginAs("bob@testbuddy.local");
@@ -1546,7 +1662,7 @@ async function testBugs() {
           priority: "LOW",
           severity: "MINOR",
           assigneeId,
-          cycleId,
+          sprintId,
           projectId: createdProjectId,
           steps: [],
         },
@@ -1573,7 +1689,7 @@ async function testBugs() {
 
   const badRefs = await api("/api/bugs", {
     method: "POST",
-    body: JSON.stringify({ ...body, cycleId: "00000000-0000-0000-0000-000000000000" }),
+    body: JSON.stringify({ ...body, sprintId: "00000000-0000-0000-0000-000000000000" }),
   });
   if (badRefs.res.status === 400) pass("POST /api/bugs validates refs");
   else fail("POST /api/bugs validates refs", `status ${badRefs.res.status}`);
@@ -1620,7 +1736,7 @@ async function testCleanup() {
   });
   const cascadeId = withBugs.json?.id;
   if (cascadeId) {
-    const cycles = await api(`/api/cycles?projectId=${cascadeId}`);
+    const cycles = await api(`/api/sprints?projectId=${cascadeId}`);
     const cId = cycles.json?.[0]?.id;
     const users = await api("/api/users");
     const aId = users.json?.[0]?.id;
@@ -1634,7 +1750,7 @@ async function testCleanup() {
           priority: "MEDIUM",
           severity: "MINOR",
           assigneeId: aId,
-          cycleId: cId,
+          sprintId: cId,
           projectId: cascadeId,
           status: "NEW",
           steps: [],
@@ -1737,6 +1853,18 @@ async function testExtensionArtifacts() {
   ) {
     pass("extension popup modules support");
   } else fail("extension popup modules support", "modules fetch not found");
+
+  if (popupBundle.includes("fetchEnvironments") || popupBundle.includes("/environments")) {
+    pass("extension popup environments support");
+  } else fail("extension popup environments support", "environments fetch not found");
+
+  if (
+    popupBundle.includes("/sprints") ||
+    popupBundle.includes("fetchSprints") ||
+    (popupJs.includes("sprintId") && popupBundle.includes("Sprint"))
+  ) {
+    pass("extension popup sprints support");
+  } else fail("extension popup sprints support", "sprints fetch not found");
 
   const popupHtml = fs.readFileSync(path.join(distPath, "popup.html"), "utf8");
   if (popupHtml.includes("./popup.js") && !popupHtml.includes('src="/popup.js"')) {

@@ -56,6 +56,7 @@ function NavIcon({ name }: { name: string }) {
         </svg>
       );
     case "Users":
+    case "Manage Users":
       return (
         <svg className={cls} viewBox="0 0 24 24" fill="none" aria-hidden>
           <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.75" />
@@ -173,9 +174,9 @@ function buildNavItems(user: ReturnType<typeof useAuth>["user"]): NavItem[] {
     const settingsIdx = items.findIndex((i) => i.to === "/settings");
     items.splice(settingsIdx >= 0 ? settingsIdx : items.length, 0, {
       to: "/users",
-      label: "Users",
+      label: "Manage Users",
       match: (path: string) => path.startsWith("/users"),
-      icon: <NavIcon name="Users" />,
+      icon: <NavIcon name="Manage Users" />,
     });
   }
   return items;

@@ -139,7 +139,7 @@ export function BugFullCard({
   bug,
   assigneeName,
   reporterName,
-  cycleName,
+  sprintName,
   moduleName,
   compactLink = true,
   collapsible = false,
@@ -152,7 +152,7 @@ export function BugFullCard({
   bug: Bug;
   assigneeName: string;
   reporterName: string;
-  cycleName: string;
+  sprintName: string;
   moduleName?: string;
   compactLink?: boolean;
   /** Project detail: summary row + expandable inner details */
@@ -210,8 +210,16 @@ export function BugFullCard({
           <dd className="mt-1 font-medium">{moduleName || "—"}</dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Cycle</dt>
-          <dd className="mt-1 font-medium">{cycleName}</dd>
+          <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Sprint</dt>
+          <dd className="mt-1 font-medium">{sprintName}</dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Environment</dt>
+          <dd className="mt-1 font-medium">
+            {bug.environmentName
+              ? `${bug.environmentName}${bug.environmentSnapshot ? ` · ${bug.environmentSnapshot}` : ""}`
+              : bug.environmentSnapshot || "—"}
+          </dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Filed</dt>
@@ -325,7 +333,7 @@ export function BugFullCard({
                   {moduleName}
                 </span>
               ) : null}
-              <span className="text-xs text-[var(--muted)]">{cycleName}</span>
+              <span className="text-xs text-[var(--muted)]">{sprintName}</span>
             </div>
 
             <h3 className="text-lg font-bold leading-snug tracking-tight text-[var(--ink)] sm:text-xl">

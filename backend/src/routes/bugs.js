@@ -14,9 +14,11 @@ function filtersFromQuery(query) {
     priority: query.priority || undefined,
     severity: query.severity || undefined,
     assigneeId: query.assigneeId || undefined,
-    cycleId: query.cycleId || undefined,
+    cycleId: query.cycleId || query.sprintId || undefined,
+    sprintId: query.sprintId || query.cycleId || undefined,
     status: query.status || undefined,
     moduleId: query.moduleId || undefined,
+    environmentId: query.environmentId || undefined,
   };
 }
 
@@ -90,7 +92,25 @@ router.delete("/comments/:commentId", async (req, res, next) => {
 
 router.get("/:id", async (req, res, next) => {
   try {
-    res.json(await app.getBug(req.user, req.params.id));
+    const syncFromAdo =
+      req.query.syncAdo === "1" || req.query.syncAdo === "true";
+    res.json(await app.getBug(req.user, req.params.id, { syncFromAdo }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/:id/push/ado", async (req, res, next) => {
+  try {
+    res.json(await app.pushBugToAdo(req.user, req.params.id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/:id/sync/ado", async (req, res, next) => {
+  try {
+    res.json(await app.syncBugFromAdo(req.user, req.params.id));
   } catch (err) {
     next(err);
   }

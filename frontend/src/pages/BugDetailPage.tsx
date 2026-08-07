@@ -7,10 +7,13 @@ import {
   deleteBugComment,
   fetchBug,
   fetchBugComments,
-  fetchCycles,
+  fetchSprints,
+  fetchEnvironments,
   fetchModules,
   fetchProjects,
   fetchUsers,
+  pushBugToAdo,
+  syncBugFromAdo,
   updateBug,
   updateBugStatus,
 } from "../api";
@@ -60,8 +63,9 @@ type EditForm = {
   severity: BugSeverity;
   status: BugStatus;
   assigneeId: string;
-  cycleId: string;
+  sprintId: string;
   moduleId: string;
+  environmentId: string;
 };
 
 function formFromBug(bug: Bug): EditForm {
@@ -72,8 +76,9 @@ function formFromBug(bug: Bug): EditForm {
     severity: bug.severity,
     status: bug.status,
     assigneeId: bug.assigneeId,
-    cycleId: bug.cycleId,
+    sprintId: bug.sprintId,
     moduleId: bug.moduleId ?? "",
+    environmentId: bug.environmentId ?? "",
   };
 }
 
@@ -98,6 +103,7 @@ export function BugDetailPage() {
   const [editMode, setEditMode] = useState<"fields" | "steps" | null>(null);
   const [form, setForm] = useState<EditForm | null>(null);
   const [stepsDraft, setStepsDraft] = useState<Step[]>([]);
+  const [adoBusy, setAdoBusy] = useState(false);
 
   const canEdit = canFullEditBug(user);
   const canStatus = canUpdateBugStatus(user);
@@ -121,14 +127,19 @@ export function BugDetailPage() {
   });
 
   const projectId = bugQuery.data?.projectId ?? projectsQuery.data?.[0]?.id;
-  const cyclesQuery = useQuery({
-    queryKey: queryKeys.cycles(projectId || "_"),
-    queryFn: () => fetchCycles(projectId!),
+  const sprintsQuery = useQuery({
+    queryKey: queryKeys.sprints(projectId || "_"),
+    queryFn: () => fetchSprints(projectId!),
     enabled: !!projectId,
   });
   const modulesQuery = useQuery({
     queryKey: queryKeys.modules(projectId || "_"),
     queryFn: () => fetchModules(projectId!),
+    enabled: !!projectId,
+  });
+  const environmentsQuery = useQuery({
+    queryKey: queryKeys.environments(projectId || "_"),
+    queryFn: () => fetchEnvironments(projectId!),
     enabled: !!projectId,
   });
 
@@ -154,9 +165,10 @@ export function BugDetailPage() {
         priority: payload.priority,
         severity: payload.severity,
         assigneeId: payload.assigneeId,
-        cycleId: payload.cycleId,
+        sprintId: payload.sprintId,
         projectId: bugQuery.data!.projectId,
         moduleId: payload.moduleId || null,
+        environmentId: payload.environmentId || null,
         status: payload.status,
       }),
     onSuccess: async () => {
@@ -182,7 +194,7 @@ export function BugDetailPage() {
         priority: b.priority,
         severity: b.severity,
         assigneeId: b.assigneeId,
-        cycleId: b.cycleId,
+        sprintId: b.sprintId,
         projectId: b.projectId,
         moduleId: b.moduleId ?? null,
         status: b.status,
@@ -225,6 +237,47 @@ export function BugDetailPage() {
     },
   });
 
+  async function onPushAdo() {
+    setAdoBusy(true);
+    setActionError(null);
+    try {
+      const result = await pushBugToAdo(id);
+      setActionMsg(
+        result.created
+          ? `Created Azure DevOps work item #${result.adoWorkItemId}`
+          : `Updated Azure DevOps work item #${result.adoWorkItemId}`,
+      );
+      await queryClient.invalidateQueries({ queryKey: queryKeys.bug(id) });
+      await queryClient.invalidateQueries({ queryKey: ["bugs"] });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "ADO push failed");
+      setActionMsg(null);
+    } finally {
+      setAdoBusy(false);
+    }
+  }
+
+  async function onSyncAdo() {
+    setAdoBusy(true);
+    setActionError(null);
+    try {
+      const result = await syncBugFromAdo(id);
+      setActionMsg(
+        `Synced from ADO #${result.adoWorkItemId}` +
+          (result.adoState ? ` (${result.adoState})` : "") +
+          (result.commentsImported ? ` · ${result.commentsImported} comment(s)` : ""),
+      );
+      await queryClient.invalidateQueries({ queryKey: queryKeys.bug(id) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.bugComments(id) });
+      await queryClient.invalidateQueries({ queryKey: ["bugs"] });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "ADO sync failed");
+      setActionMsg(null);
+    } finally {
+      setAdoBusy(false);
+    }
+  }
+
   const commentMutation = useMutation({
     mutationFn: (body: string) => createBugComment(id, body),
     onSuccess: async () => {
@@ -250,11 +303,11 @@ export function BugDetailPage() {
 
   const bug = bugQuery.data;
   const nameOf = (uid: string) => usersQuery.data?.find((u) => u.id === uid)?.name ?? uid.slice(0, 8);
-  const cycleName = cyclesQuery.data?.find((c) => c.id === bug?.cycleId)?.name ?? "�";
+  const sprintName = sprintsQuery.data?.find((c) => c.id === bug?.sprintId)?.name ?? "—";
   const moduleName =
     modulesQuery.data?.find((m) => m.id === bug?.moduleId)?.name ??
-    (bug?.moduleId ? bug.moduleId.slice(0, 8) : "�");
-  const projectName = projectsQuery.data?.find((p) => p.id === bug?.projectId)?.name ?? "�";
+    (bug?.moduleId ? bug.moduleId.slice(0, 8) : "—");
+  const projectName = projectsQuery.data?.find((p) => p.id === bug?.projectId)?.name ?? "—";
   const backToProject = fromProjectId || bug?.projectId;
   const backToModule =
     fromModuleId && backToProject
@@ -270,7 +323,7 @@ export function BugDetailPage() {
       await exportBug(format, {
         bug,
         projectName,
-        cycleName,
+        sprintName,
         assigneeName: nameOf(bug.assigneeId),
         reporterName: nameOf(bug.reporterId),
       });
@@ -324,8 +377,8 @@ export function BugDetailPage() {
       setActionError("Title is required");
       return;
     }
-    if (!form.assigneeId || !form.cycleId) {
-      setActionError("Assignee and cycle are required");
+    if (!form.assigneeId || !form.sprintId) {
+      setActionError("Assignee and sprint are required");
       return;
     }
     saveFieldsMutation.mutate(form);
@@ -474,14 +527,14 @@ export function BugDetailPage() {
                 </select>
               </label>
               <label className="tb-label">
-                Cycle
+                Sprint
                 <select
                   className="tb-select"
-                  value={form.cycleId}
-                  onChange={(e) => setForm({ ...form, cycleId: e.target.value })}
+                  value={form.sprintId}
+                  onChange={(e) => setForm({ ...form, sprintId: e.target.value })}
                   required
                 >
-                  {(cyclesQuery.data ?? []).map((c) => (
+                  {(sprintsQuery.data ?? []).map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                       {c.isDefault ? " (default)" : ""}
@@ -502,6 +555,24 @@ export function BugDetailPage() {
                       {m.name}
                     </option>
                   ))}
+                </select>
+              </label>
+              <label className="tb-label">
+                Environment
+                <select
+                  className="tb-select"
+                  value={form.environmentId}
+                  onChange={(e) => setForm({ ...form, environmentId: e.target.value })}
+                >
+                  <option value="">Not set</option>
+                  {(environmentsQuery.data ?? [])
+                    .filter((e) => e.active)
+                    .map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name}
+                        {e.isDefault ? " (default)" : ""}
+                      </option>
+                    ))}
                 </select>
               </label>
             </div>
@@ -630,6 +701,30 @@ export function BugDetailPage() {
                   )}
                   <button
                     type="button"
+                    onClick={() => void onPushAdo()}
+                    className="tb-btn-ghost text-xs"
+                    disabled={adoBusy}
+                    title="Create or update this bug on Azure DevOps"
+                  >
+                    {adoBusy
+                      ? "ADO…"
+                      : bug.externalRefs?.adoWorkItemId
+                        ? "Update on ADO"
+                        : "Push to ADO"}
+                  </button>
+                  {bug.externalRefs?.adoWorkItemId ? (
+                    <button
+                      type="button"
+                      onClick={() => void onSyncAdo()}
+                      className="tb-btn-ghost text-xs"
+                      disabled={adoBusy}
+                      title="Pull title, status, and comments from Azure DevOps"
+                    >
+                      Sync from ADO
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
                     onClick={() => setExportOpen(true)}
                     className="tb-btn-ghost text-xs"
                   >
@@ -670,9 +765,37 @@ export function BugDetailPage() {
               <MetaTile label="Reporter" value={nameOf(bug.reporterId)} />
               <MetaTile label="Project" value={projectName} />
               <MetaTile label="Module" value={moduleName} />
-              <MetaTile label="Cycle" value={cycleName} />
+              <MetaTile label="Sprint" value={sprintName} />
+              <MetaTile
+                label="Environment"
+                value={
+                  bug.environmentName
+                    ? `${bug.environmentName}${bug.environmentSnapshot ? ` · ${bug.environmentSnapshot}` : ""}`
+                    : bug.environmentSnapshot || "—"
+                }
+              />
+              <MetaTile
+                label="ADO work item"
+                value={
+                  bug.externalRefs?.adoWorkItemId
+                    ? `#${bug.externalRefs.adoWorkItemId}`
+                    : "Not synced"
+                }
+              />
               <MetaTile label="Filed" value={formatWhen(bug.createdAt)} />
             </dl>
+            {bug.externalRefs?.adoWorkItemUrl ? (
+              <div className="border-t border-[var(--line)] px-6 py-3 text-sm">
+                <a
+                  className="tb-link font-medium"
+                  href={bug.externalRefs.adoWorkItemUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open in Azure DevOps →
+                </a>
+              </div>
+            ) : null}
           </header>
 
           <section className="tb-card p-6">

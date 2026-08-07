@@ -3,7 +3,8 @@ import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchBugs,
-  fetchCycles,
+  fetchSprints,
+  fetchEnvironments,
   fetchModules,
   fetchProject,
   fetchTestCases,
@@ -138,9 +139,14 @@ export function ModuleDetailPage() {
     queryFn: () => fetchModules(projectId),
     enabled: !!projectId,
   });
-  const cyclesQuery = useQuery({
-    queryKey: queryKeys.cycles(projectId),
-    queryFn: () => fetchCycles(projectId),
+  const sprintsQuery = useQuery({
+    queryKey: queryKeys.sprints(projectId),
+    queryFn: () => fetchSprints(projectId),
+    enabled: !!projectId,
+  });
+  const environmentsQuery = useQuery({
+    queryKey: queryKeys.environments(projectId),
+    queryFn: () => fetchEnvironments(projectId),
     enabled: !!projectId,
   });
   const usersQuery = useQuery({
@@ -166,12 +172,13 @@ export function ModuleDetailPage() {
   const bugs = bugsQuery.data ?? [];
   const testCases = testCasesQuery.data ?? [];
   const users = usersQuery.data ?? [];
-  const cycles = cyclesQuery.data ?? [];
+  const sprints = sprintsQuery.data ?? [];
+  const environments = environmentsQuery.data ?? [];
   const modules = modulesQuery.data ?? [];
   const projectName = projectQuery.data?.name ?? "…";
   const nameOf = (uid: string) => users.find((u) => u.id === uid)?.name ?? uid.slice(0, 8);
-  const cycleLabel = (cycleId: string) =>
-    cycles.find((c) => c.id === cycleId)?.name ?? cycleId.slice(0, 8);
+  const sprintLabel = (sprintId: string) =>
+    sprints.find((c) => c.id === sprintId)?.name ?? sprintId.slice(0, 8);
 
   const openBug = openBugId ? bugs.find((b) => b.id === openBugId) : undefined;
 
@@ -298,7 +305,7 @@ export function ModuleDetailPage() {
         list.map((bug) => ({
           bug,
           projectName,
-          cycleName: cycleLabel(bug.cycleId),
+          sprintName: sprintLabel(bug.sprintId),
           assigneeName: nameOf(bug.assigneeId),
           reporterName: nameOf(bug.reporterId),
         })),
@@ -419,12 +426,13 @@ export function ModuleDetailPage() {
               bug={openBug}
               assigneeName={nameOf(openBug.assigneeId)}
               reporterName={nameOf(openBug.reporterId)}
-              cycleName={cycleLabel(openBug.cycleId)}
+              sprintName={sprintLabel(openBug.sprintId)}
               moduleName={mod.name}
               projectName={projectName}
               users={users}
-              cycles={cycles}
+              sprints={sprints}
               modules={modules}
+              environments={environments}
               canEdit={canEdit}
               canStatus={canStatus}
               canComment={canComment}
@@ -592,7 +600,7 @@ export function ModuleDetailPage() {
                   testCases={testCases}
                   loading={testCasesQuery.isLoading}
                   users={users}
-                  cycles={cycles}
+                  sprints={sprints}
                   currentUser={user}
                   selectedIds={selectedTcIds}
                   onToggleOne={toggleTc}

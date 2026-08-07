@@ -26,7 +26,8 @@ async function ensureDemoOrgMembers(orgId) {
 
   await query(
     `INSERT INTO organization_members (organization_id, user_id, created_at)
-     SELECT $1, id, NOW() FROM users WHERE active = true
+     SELECT $1, id, NOW() FROM users
+     WHERE active = true AND role <> 'SUPERADMIN'
      ON CONFLICT DO NOTHING`,
     [orgId],
   );
@@ -51,13 +52,13 @@ async function ensureDemoProject(orgId) {
     [projectId, orgId],
   );
   await query(
-    `INSERT INTO cycles (id, project_id, name, is_default, start_date, end_date)
-     VALUES ($1, $2, 'Cycle 1', true, NULL, NULL)`,
+    `INSERT INTO cycles (id, project_id, name, is_default, start_date, end_date, source, active)
+     VALUES ($1, $2, 'Sprint 1', true, NULL, NULL, 'MANUAL', true)`,
     [randomUUID(), projectId],
   );
   await query(
-    `INSERT INTO cycles (id, project_id, name, is_default, start_date, end_date)
-     VALUES ($1, $2, 'Cycle 2', false, NULL, NULL)`,
+    `INSERT INTO cycles (id, project_id, name, is_default, start_date, end_date, source, active)
+     VALUES ($1, $2, 'Sprint 2', false, NULL, NULL, 'MANUAL', true)`,
     [randomUUID(), projectId],
   );
   console.log("Seeded Demo Project");

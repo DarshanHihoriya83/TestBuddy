@@ -4,7 +4,8 @@ import {
   assertExtensionTester,
   clearSession,
   createBug,
-  fetchCycles,
+  fetchSprints,
+  fetchEnvironments,
   fetchMe,
   fetchModules,
   fetchProjects,
@@ -22,9 +23,10 @@ import {
   type RecordingSession,
 } from "./recording";
 import { composeBugDescription } from "./content/bugCapture";
+import { detectEnvironmentSnapshot, hostnameFromUrl } from "./environmentSnapshot";
 import { polishBugCopy, polishBugDescription, polishBugTitle } from "./bugPolish";
 import { renderBoldText } from "./renderBold";
-import type { BugPriority, BugSeverity, Cycle, Module, Project, User } from "./types";
+import type { BugPriority, BugSeverity, Environment, Module, Project, Sprint, User } from "./types";
 
 type Mode = "BUG" | "TEST_CASE";
 
@@ -40,10 +42,12 @@ export function PopupApp() {
   const [severity, setSeverity] = useState<BugSeverity>("MAJOR");
   const [users, setUsers] = useState<User[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [cycles, setCycles] = useState<Cycle[]>([]);
+  const [sprints, setSprints] = useState<Sprint[]>([]);
+  const [environments, setEnvironments] = useState<Environment[]>([]);
   const [modules, setModules] = useState<Module[]>([]);
   const [projectId, setProjectId] = useState("");
-  const [cycleId, setCycleId] = useState("");
+  const [sprintId, setSprintId] = useState("");
+  const [environmentId, setEnvironmentId] = useState("");
   const [moduleId, setModuleId] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -123,15 +127,21 @@ export function PopupApp() {
     if (!token || !projectId) return;
     void (async () => {
       try {
-        const [cycleList, moduleList] = await Promise.all([
-          fetchCycles(projectId),
+        const [sprintList, moduleList, envList] = await Promise.all([
+          fetchSprints(projectId),
           fetchModules(projectId),
+          fetchEnvironments(projectId),
         ]);
-        setCycles(cycleList);
+        setSprints(sprintList);
         setModules(moduleList);
-        const def = cycleList.find((c) => c.isDefault) ?? cycleList[0];
-        setCycleId((prev) =>
-          prev && cycleList.some((c) => c.id === prev) ? prev : def?.id ?? "",
+        setEnvironments(envList.filter((e) => e.active));
+        const def = sprintList.find((c) => c.isDefault) ?? sprintList[0];
+        setSprintId((prev) =>
+          prev && sprintList.some((c) => c.id === prev) ? prev : def?.id ?? "",
+        );
+        const defEnv = envList.find((e) => e.active && e.isDefault) ?? envList.find((e) => e.active);
+        setEnvironmentId((prev) =>
+          prev && envList.some((e) => e.id === prev && e.active) ? prev : defEnv?.id ?? "",
         );
         // Keep current module if still valid; otherwise default to first / empty
         setModuleId((prev) => {
@@ -144,11 +154,12 @@ export function PopupApp() {
     })();
   }, [token, projectId]);
 
-  // When a stopped recording loads, restore project/module/cycle from its meta
+  // When a stopped recording loads, restore project/module/sprint from its meta
   useEffect(() => {
     if (recording.status !== "stopped" || !recording.meta) return;
     if (recording.meta.projectId) setProjectId(recording.meta.projectId);
-    if (recording.meta.cycleId) setCycleId(recording.meta.cycleId);
+    if (recording.meta.sprintId) setSprintId(recording.meta.sprintId);
+    if (recording.meta.environmentId) setEnvironmentId(recording.meta.environmentId);
     if (recording.meta.moduleId) setModuleId(recording.meta.moduleId);
     if (recording.meta.assigneeId) setAssigneeId(recording.meta.assigneeId);
   }, [recording.status, recording.meta]);
@@ -173,12 +184,13 @@ export function PopupApp() {
       title.trim() &&
       description.trim() &&
       projectId &&
-      cycleId &&
+      sprintId &&
       assigneeId &&
+      (environments.length === 0 || !!environmentId) &&
       (modules.length === 0 || !!moduleId) &&
       !busy &&
       recording.status === "idle",
-    [mode, title, description, projectId, cycleId, moduleId, modules.length, assigneeId, busy, recording.status],
+    [mode, title, description, projectId, sprintId, environmentId, moduleId, modules.length, environments.length, assigneeId, busy, recording.status],
   );
 
   const canSubmitRecording = useMemo(
@@ -284,6 +296,7 @@ export function PopupApp() {
       if (tab.url?.startsWith("chrome://") || tab.url?.startsWith("edge://") || tab.url?.startsWith("about:")) {
         throw new Error("Open a normal webpage first — cannot record browser internal pages");
       }
+      const environmentSnapshot = detectEnvironmentSnapshot(hostnameFromUrl(tab.url));
 
       const res = (await browser.runtime.sendMessage({
         type: "START_RECORDING",
@@ -294,10 +307,12 @@ export function PopupApp() {
           priority,
           severity,
           assigneeId,
-          cycleId,
+          sprintId,
           projectId,
           moduleId: moduleId || undefined,
           moduleName: modules.find((m) => m.id === moduleId)?.name,
+          environmentId: environmentId || undefined,
+          environmentSnapshot,
         },
       })) as { ok: boolean; session?: RecordingSession; error?: string };
 
@@ -408,9 +423,15 @@ export function PopupApp() {
     setMessage(null);
     try {
       assertExtensionTester(await fetchMe());
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      const environmentSnapshot =
+        recording.meta.environmentSnapshot ||
+        detectEnvironmentSnapshot(hostnameFromUrl(tab?.url));
       const bug = await createBug({
         ...recording.meta,
         moduleId: moduleId || recording.meta.moduleId || undefined,
+        environmentId: environmentId || recording.meta.environmentId || undefined,
+        environmentSnapshot,
         description: composeBugDescription(
           recording.meta.description,
           recording.screenshots || [],
@@ -746,14 +767,33 @@ export function PopupApp() {
             </select>
           </label>
           <label>
-            Cycle
-            <select value={cycleId} onChange={(e) => setCycleId(e.target.value)} required>
-              {cycles.map((c) => (
+            Sprint
+            <select value={sprintId} onChange={(e) => setSprintId(e.target.value)} required>
+              {sprints.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                   {c.isDefault ? " (default)" : ""}
                 </option>
               ))}
+            </select>
+          </label>
+          <label>
+            Environment
+            <select
+              value={environmentId}
+              onChange={(e) => setEnvironmentId(e.target.value)}
+              required={environments.length > 0}
+            >
+              {environments.length === 0 ? (
+                <option value="">No environments configured</option>
+              ) : (
+                environments.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                    {e.isDefault ? " (default)" : ""}
+                  </option>
+                ))
+              )}
             </select>
           </label>
           <label>

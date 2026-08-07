@@ -102,6 +102,18 @@ export function canManageModules(user) {
   return r === "MANAGER" || r === "TESTER";
 }
 
+/** Project environments — SuperAdmin or Manager only. */
+export function canManageEnvironments(user) {
+  const r = normalizeRole(user?.role);
+  return r === "SUPERADMIN" || r === "MANAGER";
+}
+
+/** Project sprints (manual + ADO import) — SuperAdmin or Manager. */
+export function canManageSprints(user) {
+  const r = normalizeRole(user?.role);
+  return r === "SUPERADMIN" || r === "MANAGER";
+}
+
 export function canCreateBug(user) {
   const r = normalizeRole(user?.role);
   return r === "SUPERADMIN" || r === "MANAGER" || r === "TESTER";

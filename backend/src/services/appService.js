@@ -10,6 +10,14 @@ import {
 } from "../errors.js";
 import { generateToken } from "./jwt.js";
 import { config } from "../config.js";
+import { decryptSecret, encryptSecret } from "../cryptoSecrets.js";
+import { listAdoIterations, testAdoConnection } from "./adoClient.js";
+import {
+  pushBugToAdo as pushBugToAdoImpl,
+  syncBugFromAdo as syncBugFromAdoImpl,
+  tryAutoPushBugToAdo,
+  tryPushCommentToAdo,
+} from "./adoSync.js";
 import {
   canAssignRole,
   canAssignWorkTo,
@@ -20,8 +28,10 @@ import {
   canCreateProject,
   canDeleteBug,
   canFullEditBug,
+  canManageEnvironments,
   canManageModules,
   canManageOrgMembers,
+  canManageSprints,
   canManageRole,
   canUpdateBugStatus,
   isManager,
@@ -90,6 +100,8 @@ function toProjectDto(project) {
     jiraProjectKey: project.jira_project_key ?? project.jiraProjectKey ?? null,
     adoOrgUrl: project.ado_org_url ?? project.adoOrgUrl ?? null,
     adoProject: project.ado_project ?? project.adoProject ?? null,
+    adoTeam: project.ado_team ?? project.adoTeam ?? null,
+    adoPatConfigured: Boolean(project.ado_pat_encrypted),
     createdBy: project.created_by ?? project.createdBy ?? null,
     createdAt: project.created_at ?? project.createdAt ?? null,
   };
@@ -158,7 +170,7 @@ function toStepDto(step) {
   };
 }
 
-function toBugDto(bug, steps, screenshots = []) {
+function toBugDto(bug, steps, screenshots = [], environmentName = null) {
   return {
     id: bug.id,
     title: bug.title,
@@ -167,16 +179,21 @@ function toBugDto(bug, steps, screenshots = []) {
     severity: bug.severity,
     assigneeId: bug.assignee_id,
     reporterId: bug.reporter_id,
-    cycleId: bug.cycle_id,
+    sprintId: bug.cycle_id,
     projectId: bug.project_id,
     moduleId: bug.module_id ?? null,
+    environmentId: bug.environment_id ?? null,
+    environmentName: environmentName ?? null,
+    environmentSnapshot: bug.environment_snapshot ?? null,
     status: bug.status,
     steps: steps.map(toStepDto),
     screenshots: screenshots.map(toScreenshotDto),
     externalRefs: {
       jiraIssueKey: bug.jira_issue_key,
       adoWorkItemId: bug.ado_work_item_id,
+      adoWorkItemUrl: bug.ado_work_item_url ?? null,
     },
+    adoLastSyncedAt: bug.ado_last_synced_at ?? null,
     createdAt: bug.created_at,
     updatedAt: bug.updated_at,
   };
@@ -213,11 +230,16 @@ async function loadScreenshots(bugId, client = null) {
 }
 
 async function hydrateBug(bug, client = null) {
-  const [steps, screenshots] = await Promise.all([
+  const q = client ? client.query.bind(client) : query;
+  const [steps, screenshots, envRows] = await Promise.all([
     loadSteps(bug.id, client),
     loadScreenshots(bug.id, client),
+    bug.environment_id
+      ? q(`SELECT name FROM environments WHERE id = $1`, [bug.environment_id])
+      : Promise.resolve({ rows: [] }),
   ]);
-  return toBugDto(bug, steps, screenshots);
+  const environmentName = envRows.rows[0]?.name ?? null;
+  return toBugDto(bug, steps, screenshots, environmentName);
 }
 
 async function requireOrganization(id) {
@@ -328,6 +350,38 @@ async function validateModuleForProject(moduleId, projectId) {
   return mod;
 }
 
+async function requireEnvironment(id) {
+  const { rows } = await query(`SELECT * FROM environments WHERE id = $1`, [id]);
+  if (!rows[0]) throw notFound("Environment not found");
+  return rows[0];
+}
+
+async function validateEnvironmentForProject(environmentId, projectId, { existingEnvironmentId } = {}) {
+  if (!environmentId) return null;
+  const env = await requireEnvironment(environmentId);
+  if (String(env.project_id) !== String(projectId)) {
+    throw badRequest("environmentId does not belong to projectId");
+  }
+  const unchanged =
+    existingEnvironmentId && String(environmentId) === String(existingEnvironmentId);
+  if (!env.active && !unchanged) {
+    throw badRequest("environment is inactive");
+  }
+  return env;
+}
+
+function toEnvironmentDto(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    name: row.name,
+    sortOrder: row.sort_order,
+    isDefault: row.is_default,
+    active: row.active,
+    createdAt: row.created_at,
+  };
+}
+
 async function requireProject(id) {
   const { rows } = await query(`SELECT * FROM projects WHERE id = $1`, [id]);
   if (!rows[0]) throw notFound("Project not found");
@@ -340,14 +394,18 @@ async function requireBug(id) {
   return rows[0];
 }
 
-async function validateRefs(projectId, cycleId, assigneeId, actor = null) {
+async function validateRefs(projectId, sprintId, assigneeId, actor = null) {
   const project = await query(`SELECT 1 FROM projects WHERE id = $1`, [projectId]);
   if (!project.rowCount) throw badRequest("Unknown projectId");
 
-  const cycle = await query(`SELECT * FROM cycles WHERE id = $1`, [cycleId]);
-  if (!cycle.rows[0]) throw badRequest("Unknown cycleId");
-  if (String(cycle.rows[0].project_id) !== String(projectId)) {
-    throw badRequest("cycleId does not belong to projectId");
+  if (!sprintId) throw badRequest("sprintId is required");
+  const sprint = await query(`SELECT * FROM cycles WHERE id = $1`, [sprintId]);
+  if (!sprint.rows[0]) throw badRequest("Unknown sprintId");
+  if (String(sprint.rows[0].project_id) !== String(projectId)) {
+    throw badRequest("sprintId does not belong to projectId");
+  }
+  if (sprint.rows[0].active === false) {
+    throw badRequest("sprint is inactive");
   }
 
   const user = await query(
@@ -358,6 +416,10 @@ async function validateRefs(projectId, cycleId, assigneeId, actor = null) {
   if (actor && !canAssignWorkTo(actor, user.rows[0])) {
     throw forbidden("SuperAdmin cannot be assigned to bugs or test cases");
   }
+}
+
+function resolveSprintId(request) {
+  return request?.sprintId || request?.cycleId || null;
 }
 
 async function assertAssignableUser(actor, userId, { optional = false } = {}) {
@@ -571,10 +633,32 @@ export async function listUsers(actor, { projectId, directory = false } = {}) {
     return rows.map(toUserDto);
   }
 
-  // Full directory only for role-transfer callers (SuperAdmin/Manager)
+  // Full directory — SuperAdmin sees everyone; Manager only their org(s).
   if (directory || isSuperAdmin(actor)) {
+    if (isSuperAdmin(actor)) {
+      const { rows } = await query(
+        `SELECT id, name, email, role, active FROM users ORDER BY ${USER_ROLE_ORDER}, name`,
+      );
+      return rows.map(toUserDto);
+    }
     const { rows } = await query(
-      `SELECT id, name, email, role, active FROM users ORDER BY ${USER_ROLE_ORDER}, name`,
+      `SELECT u.id, u.name, u.email, u.role, u.active
+       FROM users u
+       INNER JOIN organization_members om ON om.user_id = u.id
+       WHERE om.organization_id IN (
+         SELECT organization_id FROM organization_members WHERE user_id = $1
+       )
+         AND u.role <> 'SUPERADMIN'
+       GROUP BY u.id, u.name, u.email, u.role, u.active
+       ORDER BY
+         CASE u.role
+           WHEN 'MANAGER' THEN 1
+           WHEN 'DEVELOPER' THEN 2
+           WHEN 'TESTER' THEN 3
+           ELSE 4
+         END,
+         u.name`,
+      [actor.id],
     );
     return rows.map(toUserDto);
   }
@@ -1080,8 +1164,12 @@ async function enrichOrganization(org) {
     `SELECT COUNT(*)::int AS c FROM projects WHERE organization_id = $1`,
     [org.id],
   );
+  // SuperAdmin is platform-scoped — never count them as org people.
   const members = await query(
-    `SELECT COUNT(*)::int AS c FROM organization_members WHERE organization_id = $1`,
+    `SELECT COUNT(*)::int AS c
+     FROM organization_members om
+     INNER JOIN users u ON u.id = om.user_id
+     WHERE om.organization_id = $1 AND u.role <> 'SUPERADMIN'`,
     [org.id],
   );
   return {
@@ -1121,12 +1209,7 @@ export async function createOrganization(actor, { name, maxProjects }) {
      VALUES ($1, $2, $3, NOW()) RETURNING *`,
     [id, orgName, orgMax],
   );
-  // SuperAdmin auto-joins
-  await query(
-    `INSERT INTO organization_members (organization_id, user_id, created_at)
-     VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING`,
-    [id, actor.id],
-  );
+  // SuperAdmin can view every org without being enrolled as a member.
   return enrichOrganization(rows[0]);
 }
 
@@ -1182,6 +1265,7 @@ export async function listOrganizationMembers(actor, organizationId) {
      FROM organization_members om
      INNER JOIN users u ON u.id = om.user_id
      WHERE om.organization_id = $1
+       AND u.role <> 'SUPERADMIN'
      ORDER BY u.name ASC`,
     [organizationId],
   );
@@ -1204,6 +1288,9 @@ export async function addOrganizationMember(actor, organizationId, userId) {
   );
   if (!users[0]) throw notFound("User not found");
   if (users[0].active === false) throw badRequest("Cannot add an inactive user");
+  if (users[0].role === "SUPERADMIN") {
+    throw badRequest("SuperAdmin is platform-scoped and cannot be added as an organization member");
+  }
   if (!canAddAsMember(actor, users[0])) {
     throw forbidden("Only SuperAdmin can add a SuperAdmin to an organization");
   }
@@ -1267,7 +1354,7 @@ export async function listProjects(actor, { organizationId } = {}) {
 export async function getProject(actor, id) {
   await assertCanAccessProject(actor, id);
   const project = await requireProject(id);
-  const cycles = await query(`SELECT COUNT(*)::int AS c FROM cycles WHERE project_id = $1`, [id]);
+  const sprints = await query(`SELECT COUNT(*)::int AS c FROM cycles WHERE project_id = $1 AND active = true`, [id]);
   const bugs = await query(`SELECT COUNT(*)::int AS c FROM bugs WHERE project_id = $1`, [id]);
   const members = await query(
     `SELECT COUNT(*)::int AS c FROM project_members WHERE project_id = $1`,
@@ -1277,16 +1364,21 @@ export async function getProject(actor, id) {
     `SELECT COUNT(*)::int AS c FROM modules WHERE project_id = $1`,
     [id],
   );
+  const environments = await query(
+    `SELECT COUNT(*)::int AS c FROM environments WHERE project_id = $1 AND active = true`,
+    [id],
+  );
   return {
     ...toProjectDto(project),
-    cycleCount: cycles.rows[0].c,
+    sprintCount: sprints.rows[0].c,
     bugCount: bugs.rows[0].c,
     memberCount: members.rows[0].c,
     moduleCount: modules.rows[0].c,
+    environmentCount: environments.rows[0].c,
   };
 }
 
-export async function createProject(actor, { name, organizationId, description, jiraProjectKey, adoOrgUrl, adoProject }) {
+export async function createProject(actor, { name, organizationId, description, jiraProjectKey, adoOrgUrl, adoProject, adoTeam, adoPat }) {
   if (!canCreateProject(actor)) {
     throw forbidden("Only Manager or SuperAdmin can create projects");
   }
@@ -1329,8 +1421,8 @@ export async function createProject(actor, { name, organizationId, description, 
   return withTransaction(async (client) => {
     const id = randomUUID();
     const { rows } = await client.query(
-      `INSERT INTO projects (id, name, description, jira_project_key, ado_org_url, ado_project, organization_id, created_by, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      `INSERT INTO projects (id, name, description, jira_project_key, ado_org_url, ado_project, ado_team, ado_pat_encrypted, organization_id, created_by, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
        RETURNING *`,
       [
         id,
@@ -1339,13 +1431,20 @@ export async function createProject(actor, { name, organizationId, description, 
         blankToNull(jiraProjectKey),
         blankToNull(adoOrgUrl),
         blankToNull(adoProject),
+        blankToNull(adoTeam),
+        adoPat ? encryptSecret(String(adoPat).trim()) : null,
         organizationId,
         actor.id,
       ],
     );
     await client.query(
-      `INSERT INTO cycles (id, project_id, name, is_default, start_date, end_date)
-       VALUES ($1, $2, 'Cycle 1', true, NULL, NULL)`,
+      `INSERT INTO cycles (id, project_id, name, is_default, start_date, end_date, source, active)
+       VALUES ($1, $2, 'Sprint 1', true, NULL, NULL, 'MANUAL', true)`,
+      [randomUUID(), id],
+    );
+    await client.query(
+      `INSERT INTO environments (id, project_id, name, sort_order, is_default, active)
+       VALUES ($1, $2, 'Dev', 0, true, true)`,
       [randomUUID(), id],
     );
     await client.query(
@@ -1379,13 +1478,20 @@ export async function getProjectCreationQuota(actor) {
   };
 }
 
-export async function updateProject(actor, id, { name, description, jiraProjectKey, adoOrgUrl, adoProject }) {
+export async function updateProject(actor, id, { name, description, jiraProjectKey, adoOrgUrl, adoProject, adoTeam, adoPat, clearAdoPat }) {
   await assertCanManageProject(actor, id);
   const projectName = assertAlphabeticalName(name, "Project name");
+  const existing = await requireProject(id);
+  let patEncrypted = existing.ado_pat_encrypted;
+  if (clearAdoPat) patEncrypted = null;
+  else if (adoPat !== undefined && adoPat !== null && String(adoPat).trim()) {
+    patEncrypted = encryptSecret(String(adoPat).trim());
+  }
   const { rows } = await query(
     `UPDATE projects
-     SET name = $1, description = $2, jira_project_key = $3, ado_org_url = $4, ado_project = $5
-     WHERE id = $6
+     SET name = $1, description = $2, jira_project_key = $3, ado_org_url = $4, ado_project = $5,
+         ado_team = $6, ado_pat_encrypted = $7
+     WHERE id = $8
      RETURNING *`,
     [
       projectName,
@@ -1393,6 +1499,8 @@ export async function updateProject(actor, id, { name, description, jiraProjectK
       blankToNull(jiraProjectKey),
       blankToNull(adoOrgUrl),
       blankToNull(adoProject),
+      blankToNull(adoTeam !== undefined ? adoTeam : existing.ado_team),
+      patEncrypted,
       id,
     ],
   );
@@ -1483,10 +1591,16 @@ export async function createBugComment(actor, bugId, { body }) {
      VALUES ($1, $2, $3, $4, NOW()) RETURNING *`,
     [id, bugId, actor.id, text],
   );
-  return {
+  const comment = {
     ...toCommentDto(rows[0]),
     authorName: actor.name,
   };
+  // Best-effort: mirror comment to linked ADO work item
+  void tryPushCommentToAdo(actor, bugId, id, {
+    getBug: loadBugDto,
+    assertCanAccessBug,
+  });
+  return comment;
 }
 
 export async function deleteBugComment(actor, commentId) {
@@ -1529,22 +1643,453 @@ export async function deleteProject(actor, id) {
 }
 
 export async function listCycles(actor, projectId) {
-  await assertCanAccessProject(actor, projectId);
-  const { rows } = await query(
-    `SELECT * FROM cycles WHERE project_id = $1 ORDER BY name ASC`,
-    [projectId],
-  );
-  return rows.map((c) => ({
+  return listSprints(actor, projectId);
+}
+
+function toSprintDto(c) {
+  return {
     id: c.id,
     projectId: c.project_id,
     name: c.name,
     isDefault: c.is_default,
     startDate: c.start_date,
     endDate: c.end_date,
-  }));
+    active: c.active !== false,
+    source: c.source || "MANUAL",
+    adoIterationId: c.ado_iteration_id ?? null,
+    adoIterationPath: c.ado_iteration_path ?? null,
+    lastSyncedAt: c.last_synced_at ?? null,
+  };
 }
 
-function buildBugFilters({ projectId, projectIds, priority, severity, assigneeId, cycleId, status, moduleId }) {
+export async function listSprints(actor, projectId) {
+  await assertCanAccessProject(actor, projectId);
+  const includeInactive = canManageSprints(actor);
+  const { rows } = await query(
+    includeInactive
+      ? `SELECT * FROM cycles WHERE project_id = $1 ORDER BY is_default DESC, name ASC`
+      : `SELECT * FROM cycles WHERE project_id = $1 AND active = true ORDER BY is_default DESC, name ASC`,
+    [projectId],
+  );
+  return rows.map(toSprintDto);
+}
+
+export async function createSprint(actor, projectId, { name, isDefault, startDate, endDate }) {
+  if (!canManageSprints(actor)) throw forbidden("You cannot manage sprints");
+  await assertCanManageProject(actor, projectId);
+  const sprintName = String(name || "").trim();
+  if (!sprintName) throw badRequest("Sprint name is required");
+
+  return withTransaction(async (client) => {
+    const { rows: countRows } = await client.query(
+      `SELECT COUNT(*)::int AS c FROM cycles WHERE project_id = $1 AND active = true`,
+      [projectId],
+    );
+    const makeDefault = isDefault === true || countRows[0].c === 0;
+    const id = randomUUID();
+    const { rows } = await client.query(
+      `INSERT INTO cycles (
+        id, project_id, name, is_default, start_date, end_date, source, active
+      ) VALUES ($1,$2,$3,$4,$5,$6,'MANUAL',true)
+      RETURNING *`,
+      [
+        id,
+        projectId,
+        sprintName,
+        makeDefault,
+        blankToNull(startDate),
+        blankToNull(endDate),
+      ],
+    );
+    if (makeDefault) {
+      await client.query(
+        `UPDATE cycles SET is_default = false WHERE project_id = $1 AND id <> $2`,
+        [projectId, id],
+      );
+    }
+    return toSprintDto(rows[0]);
+  });
+}
+
+export async function updateSprint(actor, id, { name, isDefault, active, startDate, endDate }) {
+  if (!canManageSprints(actor)) throw forbidden("You cannot manage sprints");
+  const { rows: existingRows } = await query(`SELECT * FROM cycles WHERE id = $1`, [id]);
+  if (!existingRows[0]) throw notFound("Sprint not found");
+  const sprint = existingRows[0];
+  await assertCanManageProject(actor, sprint.project_id);
+
+  const nextName = name !== undefined ? String(name).trim() : sprint.name;
+  if (!nextName) throw badRequest("Sprint name is required");
+  const nextActive = active !== undefined ? !!active : sprint.active !== false;
+  const nextDefault =
+    isDefault === true ? true : isDefault === false ? false : sprint.is_default;
+  if (nextDefault && !nextActive) {
+    throw badRequest("Inactive sprint cannot be default");
+  }
+
+  return withTransaction(async (client) => {
+    const { rows } = await client.query(
+      `UPDATE cycles SET
+        name = $1,
+        is_default = $2,
+        active = $3,
+        start_date = COALESCE($4, start_date),
+        end_date = COALESCE($5, end_date)
+       WHERE id = $6
+       RETURNING *`,
+      [
+        nextName,
+        nextDefault,
+        nextActive,
+        startDate !== undefined ? blankToNull(startDate) : null,
+        endDate !== undefined ? blankToNull(endDate) : null,
+        id,
+      ],
+    );
+    if (nextDefault) {
+      await client.query(
+        `UPDATE cycles SET is_default = false WHERE project_id = $1 AND id <> $2`,
+        [sprint.project_id, id],
+      );
+      rows[0].is_default = true;
+    } else if ((sprint.is_default && !nextDefault) || (sprint.is_default && !nextActive)) {
+      await client.query(`UPDATE cycles SET is_default = false WHERE id = $1`, [id]);
+      const { rows: fallback } = await client.query(
+        `SELECT id FROM cycles
+         WHERE project_id = $1 AND active = true AND id <> $2
+         ORDER BY name ASC LIMIT 1`,
+        [sprint.project_id, id],
+      );
+      if (fallback[0]) {
+        await client.query(`UPDATE cycles SET is_default = true WHERE id = $1`, [
+          fallback[0].id,
+        ]);
+      }
+      rows[0].is_default = false;
+    }
+    return toSprintDto(rows[0]);
+  });
+}
+
+export async function deleteSprint(actor, id) {
+  if (!canManageSprints(actor)) throw forbidden("You cannot manage sprints");
+  const { rows: existingRows } = await query(`SELECT * FROM cycles WHERE id = $1`, [id]);
+  if (!existingRows[0]) throw notFound("Sprint not found");
+  const sprint = existingRows[0];
+  await assertCanManageProject(actor, sprint.project_id);
+
+  const { rows: activeRows } = await query(
+    `SELECT COUNT(*)::int AS c FROM cycles WHERE project_id = $1 AND active = true`,
+    [sprint.project_id],
+  );
+  if (activeRows[0].c <= 1 && sprint.active !== false) {
+    throw badRequest("Project must keep at least one active sprint");
+  }
+
+  const { rows: bugCount } = await query(
+    `SELECT COUNT(*)::int AS c FROM bugs WHERE cycle_id = $1`,
+    [id],
+  );
+  const { rows: tcCount } = await query(
+    `SELECT COUNT(*)::int AS c FROM test_cases WHERE cycle_id = $1`,
+    [id],
+  );
+  if (bugCount[0].c > 0 || tcCount[0].c > 0) {
+    throw badRequest(
+      "Cannot delete sprint with bugs or test cases — deactivate it instead",
+    );
+  }
+
+  if (sprint.is_default) {
+    const { rows: fallback } = await query(
+      `SELECT id FROM cycles
+       WHERE project_id = $1 AND active = true AND id <> $2
+       ORDER BY name ASC LIMIT 1`,
+      [sprint.project_id, id],
+    );
+    if (fallback[0]) {
+      await query(`UPDATE cycles SET is_default = true WHERE id = $1`, [fallback[0].id]);
+    }
+  }
+  await query(`DELETE FROM cycles WHERE id = $1`, [id]);
+}
+
+export async function testProjectAdoConnection(actor, projectId) {
+  if (!canManageSprints(actor)) throw forbidden("You cannot manage Azure DevOps settings");
+  await assertCanManageProject(actor, projectId);
+  const project = await requireProject(projectId);
+  if (!project.ado_org_url || !project.ado_project) {
+    throw badRequest("Set Azure DevOps org URL and project name first");
+  }
+  if (!project.ado_pat_encrypted) {
+    throw badRequest("Save an Azure DevOps PAT first");
+  }
+  const pat = decryptSecret(project.ado_pat_encrypted);
+  return testAdoConnection({
+    orgUrl: project.ado_org_url,
+    project: project.ado_project,
+    team: project.ado_team,
+    pat,
+  });
+}
+
+export async function listProjectAdoIterations(actor, projectId) {
+  if (!canManageSprints(actor)) throw forbidden("You cannot manage Azure DevOps settings");
+  await assertCanManageProject(actor, projectId);
+  const project = await requireProject(projectId);
+  if (!project.ado_org_url || !project.ado_project || !project.ado_pat_encrypted) {
+    throw badRequest("Configure Azure DevOps org URL, project, and PAT first");
+  }
+  const pat = decryptSecret(project.ado_pat_encrypted);
+  return listAdoIterations({
+    orgUrl: project.ado_org_url,
+    project: project.ado_project,
+    team: project.ado_team,
+    pat,
+  });
+}
+
+export async function importAdoSprints(actor, projectId, { iterationIds } = {}) {
+  if (!canManageSprints(actor)) throw forbidden("You cannot manage sprints");
+  await assertCanManageProject(actor, projectId);
+  const iterations = await listProjectAdoIterations(actor, projectId);
+  const wanted = Array.isArray(iterationIds) && iterationIds.length
+    ? new Set(iterationIds.map(String))
+    : null;
+  const selected = wanted
+    ? iterations.filter((it) => wanted.has(String(it.id)))
+    : iterations;
+  if (!selected.length) throw badRequest("No iterations to import");
+
+  const imported = [];
+  await withTransaction(async (client) => {
+    const { rows: activeCount } = await client.query(
+      `SELECT COUNT(*)::int AS c FROM cycles WHERE project_id = $1 AND active = true`,
+      [projectId],
+    );
+    let hasDefault = activeCount[0].c > 0;
+
+    for (const it of selected) {
+      const { rows: existing } = await client.query(
+        `SELECT * FROM cycles WHERE project_id = $1 AND ado_iteration_id = $2`,
+        [projectId, it.id],
+      );
+      const start = it.startDate ? String(it.startDate).slice(0, 10) : null;
+      const end = it.finishDate ? String(it.finishDate).slice(0, 10) : null;
+      const makeDefault = !hasDefault && it.timeFrame === "current";
+      if (existing[0]) {
+        const { rows } = await client.query(
+          `UPDATE cycles SET
+            name = $1,
+            ado_iteration_path = $2,
+            start_date = $3,
+            end_date = $4,
+            source = 'ADO',
+            active = true,
+            last_synced_at = NOW(),
+            is_default = CASE WHEN $5 THEN true ELSE is_default END
+           WHERE id = $6
+           RETURNING *`,
+          [it.name, it.path, start, end, makeDefault, existing[0].id],
+        );
+        if (makeDefault) {
+          await client.query(
+            `UPDATE cycles SET is_default = false WHERE project_id = $1 AND id <> $2`,
+            [projectId, existing[0].id],
+          );
+          hasDefault = true;
+        }
+        imported.push(toSprintDto(rows[0]));
+      } else {
+        const id = randomUUID();
+        const { rows } = await client.query(
+          `INSERT INTO cycles (
+            id, project_id, name, is_default, start_date, end_date,
+            ado_iteration_id, ado_iteration_path, source, active, last_synced_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'ADO',true,NOW())
+          RETURNING *`,
+          [id, projectId, it.name, makeDefault || !hasDefault, start, end, it.id, it.path],
+        );
+        if (makeDefault || !hasDefault) {
+          await client.query(
+            `UPDATE cycles SET is_default = false WHERE project_id = $1 AND id <> $2`,
+            [projectId, id],
+          );
+          hasDefault = true;
+        }
+        imported.push(toSprintDto(rows[0]));
+      }
+    }
+  });
+  return { imported: imported.length, sprints: imported };
+}
+
+export async function listEnvironments(actor, projectId) {
+  await assertCanAccessProject(actor, projectId);
+  const includeInactive = canManageEnvironments(actor);
+  const { rows } = await query(
+    includeInactive
+      ? `SELECT * FROM environments WHERE project_id = $1
+         ORDER BY sort_order ASC, name ASC`
+      : `SELECT * FROM environments WHERE project_id = $1 AND active = true
+         ORDER BY sort_order ASC, name ASC`,
+    [projectId],
+  );
+  return rows.map(toEnvironmentDto);
+}
+
+export async function createEnvironment(actor, projectId, { name, isDefault }) {
+  if (!canManageEnvironments(actor)) {
+    throw forbidden("You cannot manage environments");
+  }
+  await assertCanManageProject(actor, projectId);
+  const envName = String(name || "").trim();
+  if (!envName) throw badRequest("Environment name is required");
+  if (envName.length > 255) throw badRequest("Environment name is too long");
+
+  return withTransaction(async (client) => {
+    const { rows: orderRows } = await client.query(
+      `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order
+       FROM environments WHERE project_id = $1`,
+      [projectId],
+    );
+    const sortOrder = orderRows[0]?.next_order ?? 0;
+    const { rows: countRows } = await client.query(
+      `SELECT COUNT(*)::int AS c FROM environments WHERE project_id = $1 AND active = true`,
+      [projectId],
+    );
+    const makeDefault = isDefault === true || countRows[0].c === 0;
+    const id = randomUUID();
+    const { rows } = await client.query(
+      `INSERT INTO environments (id, project_id, name, sort_order, is_default, active)
+       VALUES ($1, $2, $3, $4, $5, true)
+       RETURNING *`,
+      [id, projectId, envName, sortOrder, makeDefault],
+    );
+    if (makeDefault) {
+      await client.query(
+        `UPDATE environments SET is_default = false
+         WHERE project_id = $1 AND id <> $2`,
+        [projectId, id],
+      );
+    }
+    return toEnvironmentDto(rows[0]);
+  });
+}
+
+export async function updateEnvironment(actor, id, { name, isDefault, active, sortOrder }) {
+  if (!canManageEnvironments(actor)) {
+    throw forbidden("You cannot manage environments");
+  }
+  const env = await requireEnvironment(id);
+  await assertCanManageProject(actor, env.project_id);
+
+  const nextName = name !== undefined ? String(name).trim() : env.name;
+  if (!nextName) throw badRequest("Environment name is required");
+
+  return withTransaction(async (client) => {
+    const nextActive = active !== undefined ? !!active : env.active;
+    const nextDefault = isDefault === true ? true : isDefault === false ? false : env.is_default;
+
+    if (nextDefault && !nextActive) {
+      throw badRequest("Inactive environment cannot be default");
+    }
+
+    const { rows } = await client.query(
+      `UPDATE environments SET
+        name = $1,
+        is_default = $2,
+        active = $3,
+        sort_order = COALESCE($4, sort_order)
+       WHERE id = $5
+       RETURNING *`,
+      [
+        nextName,
+        nextDefault,
+        nextActive,
+        sortOrder !== undefined ? Number(sortOrder) : null,
+        id,
+      ],
+    );
+
+    if (nextDefault) {
+      await client.query(
+        `UPDATE environments SET is_default = false
+         WHERE project_id = $1 AND id <> $2`,
+        [env.project_id, id],
+      );
+      rows[0].is_default = true;
+    } else if (env.is_default && !nextDefault) {
+      const { rows: fallback } = await client.query(
+        `SELECT id FROM environments
+         WHERE project_id = $1 AND active = true AND id <> $2
+         ORDER BY sort_order ASC, name ASC
+         LIMIT 1`,
+        [env.project_id, id],
+      );
+      if (fallback[0]) {
+        await client.query(`UPDATE environments SET is_default = true WHERE id = $1`, [
+          fallback[0].id,
+        ]);
+      }
+    }
+
+    if (env.is_default && !nextActive) {
+      await client.query(`UPDATE environments SET is_default = false WHERE id = $1`, [id]);
+      const { rows: fallback } = await client.query(
+        `SELECT id FROM environments
+         WHERE project_id = $1 AND active = true AND id <> $2
+         ORDER BY sort_order ASC, name ASC
+         LIMIT 1`,
+        [env.project_id, id],
+      );
+      if (fallback[0]) {
+        await client.query(`UPDATE environments SET is_default = true WHERE id = $1`, [
+          fallback[0].id,
+        ]);
+      }
+      rows[0].is_default = false;
+    }
+
+    return toEnvironmentDto(rows[0]);
+  });
+}
+
+export async function deleteEnvironment(actor, id) {
+  if (!canManageEnvironments(actor)) {
+    throw forbidden("You cannot manage environments");
+  }
+  const env = await requireEnvironment(id);
+  await assertCanManageProject(actor, env.project_id);
+
+  const { rows: activeRows } = await query(
+    `SELECT COUNT(*)::int AS c FROM environments
+     WHERE project_id = $1 AND active = true`,
+    [env.project_id],
+  );
+  if (activeRows[0].c <= 1 && env.active) {
+    throw badRequest("Project must keep at least one active environment");
+  }
+
+  await query(`UPDATE bugs SET environment_id = NULL WHERE environment_id = $1`, [id]);
+
+  if (env.is_default) {
+    const { rows: fallback } = await query(
+      `SELECT id FROM environments
+       WHERE project_id = $1 AND active = true AND id <> $2
+       ORDER BY sort_order ASC, name ASC
+       LIMIT 1`,
+      [env.project_id, id],
+    );
+    if (fallback[0]) {
+      await query(`UPDATE environments SET is_default = true WHERE id = $1`, [fallback[0].id]);
+    }
+  }
+
+  await query(`DELETE FROM environments WHERE id = $1`, [id]);
+}
+
+function buildBugFilters({ projectId, projectIds, priority, severity, assigneeId, sprintId, cycleId, status, moduleId, environmentId }) {
   const clauses = [];
   const params = [];
   const add = (sql, value) => {
@@ -1563,9 +2108,11 @@ function buildBugFilters({ projectId, projectIds, priority, severity, assigneeId
   if (priority) add("priority =", priority);
   if (severity) add("severity =", severity);
   if (assigneeId) add("assignee_id =", assigneeId);
-  if (cycleId) add("cycle_id =", cycleId);
+  const resolvedSprint = sprintId || cycleId;
+  if (resolvedSprint) add("cycle_id =", resolvedSprint);
   if (status) add("status =", status);
   if (moduleId) add("module_id =", moduleId);
+  if (environmentId) add("environment_id =", environmentId);
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return { where, params };
 }
@@ -1607,9 +2154,31 @@ export async function importBugs({ bugs }, reporter) {
   return { imported: imported.length, bugs: imported };
 }
 
-export async function getBug(actor, id) {
-  const bug = await assertCanAccessBug(actor, id);
-  return hydrateBug(bug);
+async function loadBugDto(actor, id) {
+  const row = await assertCanAccessBug(actor, id);
+  return hydrateBug(row);
+}
+
+export async function getBug(actor, id, { syncFromAdo = false } = {}) {
+  let bug = await loadBugDto(actor, id);
+
+  const linked = bug.externalRefs?.adoWorkItemId;
+  if (linked) {
+    const last = bug.adoLastSyncedAt ? new Date(bug.adoLastSyncedAt).getTime() : 0;
+    const stale = Date.now() - last > 60_000;
+    if (syncFromAdo || stale) {
+      try {
+        const synced = await syncBugFromAdoImpl(actor, id, {
+          getBug: loadBugDto,
+          assertCanAccessBug,
+        });
+        bug = synced.bug;
+      } catch {
+        /* keep local copy if ADO unreachable */
+      }
+    }
+  }
+  return bug;
 }
 
 async function persistScreenshots(client, bugId, screenshots) {
@@ -1642,17 +2211,19 @@ export async function createBug(request, reporter) {
   }
   if (!request.projectId) throw badRequest("projectId is required");
   await assertCanAccessProject(reporter, request.projectId);
-  await validateRefs(request.projectId, request.cycleId, request.assigneeId, reporter);
+  await validateRefs(request.projectId, resolveSprintId(request), request.assigneeId, reporter);
   await validateModuleForProject(request.moduleId, request.projectId);
-  return withTransaction(async (client) => {
+  await validateEnvironmentForProject(request.environmentId, request.projectId);
+  const environmentSnapshot = blankToNull(request.environmentSnapshot);
+  const bug = await withTransaction(async (client) => {
     const id = randomUUID();
     const now = new Date();
     const { rows } = await client.query(
       `INSERT INTO bugs (
         id, title, description, priority, severity, assignee_id, reporter_id,
-        cycle_id, project_id, module_id, status, jira_issue_key, ado_work_item_id,
-        created_at, updated_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,NULL,$12,$12)
+        cycle_id, project_id, module_id, environment_id, environment_snapshot,
+        status, jira_issue_key, ado_work_item_id, created_at, updated_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULL,NULL,$14,$14)
       RETURNING *`,
       [
         id,
@@ -1662,9 +2233,11 @@ export async function createBug(request, reporter) {
         request.severity,
         request.assigneeId,
         reporter.id,
-        request.cycleId,
+        resolveSprintId(request),
         request.projectId,
         request.moduleId || null,
+        request.environmentId || null,
+        environmentSnapshot,
         request.status || "NEW",
         now,
       ],
@@ -1673,6 +2246,24 @@ export async function createBug(request, reporter) {
     await persistScreenshots(client, id, request.screenshots);
     return hydrateBug(rows[0], client);
   });
+
+  // Best-effort ADO create when project has PAT configured
+  const adoPush = await tryAutoPushBugToAdo(reporter, bug.id, {
+    getBug: loadBugDto,
+    assertCanAccessBug,
+  });
+  if (!adoPush.skipped && adoPush.bug) {
+    return adoPush.bug;
+  }
+  return bug;
+}
+
+export async function pushBugToAdo(actor, bugId) {
+  return pushBugToAdoImpl(actor, bugId, { getBug: loadBugDto, assertCanAccessBug });
+}
+
+export async function syncBugFromAdo(actor, bugId) {
+  return syncBugFromAdoImpl(actor, bugId, { getBug: loadBugDto, assertCanAccessBug });
 }
 
 export async function updateBug(id, request, actor) {
@@ -1689,33 +2280,51 @@ export async function updateBug(id, request, actor) {
       `UPDATE bugs SET status = $1, updated_at = $2 WHERE id = $3 RETURNING *`,
       [request.status, new Date(), id],
     );
-    return hydrateBug(rows[0]);
+    const updated = await hydrateBug(rows[0]);
+    if (existing.ado_work_item_id) {
+      void tryAutoPushBugToAdo(actor, id, { getBug: loadBugDto, assertCanAccessBug });
+    }
+    return updated;
   }
 
   if (canFullEditBug(actor)) {
     const projectId = request.projectId ?? existing.project_id;
-    const cycleId = request.cycleId ?? existing.cycle_id;
     const assigneeId = request.assigneeId ?? existing.assignee_id;
+    const sprintId =
+      resolveSprintId(request) !== null &&
+      (request.sprintId !== undefined || request.cycleId !== undefined)
+        ? resolveSprintId(request)
+        : existing.cycle_id;
     const moduleId =
       request.moduleId !== undefined ? request.moduleId : existing.module_id;
+    const environmentId =
+      request.environmentId !== undefined ? request.environmentId : existing.environment_id;
+    const environmentSnapshot =
+      request.environmentSnapshot !== undefined
+        ? blankToNull(request.environmentSnapshot)
+        : existing.environment_snapshot;
     await validateRefs(
       projectId,
-      cycleId,
+      sprintId,
       assigneeId,
       request.assigneeId !== undefined ? actor : null,
     );
     await validateModuleForProject(moduleId, projectId);
+    await validateEnvironmentForProject(environmentId, projectId, {
+      existingEnvironmentId: existing.environment_id,
+    });
     if (String(projectId) !== String(existing.project_id)) {
       await assertCanAccessProject(actor, projectId);
     }
-    return withTransaction(async (client) => {
+    const updated = await withTransaction(async (client) => {
       const now = new Date();
       const { rows } = await client.query(
         `UPDATE bugs SET
           title = $1, description = $2, priority = $3, severity = $4,
-          assignee_id = $5, cycle_id = $6, project_id = $7, module_id = $8, status = $9,
-          updated_at = $10
-         WHERE id = $11
+          assignee_id = $5, cycle_id = $6, project_id = $7, module_id = $8,
+          environment_id = $9, environment_snapshot = $10, status = $11,
+          updated_at = $12
+         WHERE id = $13
          RETURNING *`,
         [
           request.title ?? existing.title,
@@ -1723,9 +2332,11 @@ export async function updateBug(id, request, actor) {
           request.priority ?? existing.priority,
           request.severity ?? existing.severity,
           assigneeId,
-          cycleId,
+          sprintId,
           projectId,
           moduleId || null,
+          environmentId || null,
+          environmentSnapshot,
           request.status ?? existing.status,
           now,
           id,
@@ -1736,6 +2347,10 @@ export async function updateBug(id, request, actor) {
       }
       return hydrateBug(rows[0], client);
     });
+    if (existing.ado_work_item_id || updated.externalRefs?.adoWorkItemId) {
+      void tryAutoPushBugToAdo(actor, id, { getBug: loadBugDto, assertCanAccessBug });
+    }
+    return updated;
   }
 
   throw forbidden("You can only update bug status");
@@ -1804,7 +2419,7 @@ function toTestCaseDto(row) {
     generatedByAi: !!row.generated_by_ai,
     projectId: row.project_id,
     moduleId: row.module_id ?? null,
-    cycleId: row.cycle_id,
+    sprintId: row.cycle_id,
     assigneeId: row.assignee_id ?? null,
     linkedBugId: row.linked_bug_id ?? null,
     createdAt: row.created_at,
@@ -1884,6 +2499,7 @@ export async function createTestCase(actor, body) {
     projectId,
     moduleId,
     cycleId,
+    sprintId,
     assigneeId,
     linkedBugId,
     generatedByAi = false,
@@ -1895,7 +2511,8 @@ export async function createTestCase(actor, body) {
   if (!TC_STATUSES.has(status)) throw badRequest("invalid status");
   if (!TC_EXEC.has(executionStatus)) throw badRequest("invalid executionStatus");
   if (!projectId) throw badRequest("projectId is required");
-  if (!cycleId) throw badRequest("cycleId is required");
+  const resolvedSprint = sprintId || cycleId;
+  if (!resolvedSprint) throw badRequest("sprintId is required");
 
   await assertCanAccessProject(actor, projectId);
 
@@ -1930,7 +2547,7 @@ export async function createTestCase(actor, body) {
       !!generatedByAi,
       projectId,
       moduleId || null,
-      cycleId,
+      resolvedSprint,
       assigneeId || null,
       linkedBugId || null,
     ],
@@ -1953,7 +2570,8 @@ export async function updateTestCase(actor, id, body) {
     status = existing.status,
     executionStatus = existing.executionStatus,
     moduleId = existing.moduleId,
-    cycleId = existing.cycleId,
+    cycleId,
+    sprintId,
     assigneeId = existing.assigneeId,
     linkedBugId = existing.linkedBugId,
   } = body || {};
@@ -1963,7 +2581,8 @@ export async function updateTestCase(actor, id, body) {
   if (!TC_PRIORITIES.has(priority)) throw badRequest("priority must be LOW, MEDIUM, or HIGH");
   if (!TC_STATUSES.has(status)) throw badRequest("invalid status");
   if (!TC_EXEC.has(executionStatus)) throw badRequest("invalid executionStatus");
-  if (!cycleId) throw badRequest("cycleId is required");
+  const resolvedSprint = sprintId || cycleId || existing.sprintId;
+  if (!resolvedSprint) throw badRequest("sprintId is required");
 
   if (moduleId) {
     const { rows: mods } = await query(`SELECT project_id FROM modules WHERE id = $1`, [moduleId]);
@@ -1993,7 +2612,7 @@ export async function updateTestCase(actor, id, body) {
       status,
       executionStatus,
       moduleId || null,
-      cycleId,
+      resolvedSprint,
       assigneeId || null,
       linkedBugId || null,
       id,
