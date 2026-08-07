@@ -15,8 +15,9 @@ import type {
   BugPriority,
   BugSeverity,
   BugStatus,
-  Cycle,
+  Environment,
   Module,
+  Sprint,
   Step,
   StepActionType,
   User,
@@ -389,8 +390,9 @@ type FieldsForm = {
   severity: BugSeverity;
   status: BugStatus;
   assigneeId: string;
-  cycleId: string;
+  sprintId: string;
   moduleId: string;
+  environmentId: string;
 };
 
 function fieldsFromBug(bug: Bug): FieldsForm {
@@ -401,8 +403,9 @@ function fieldsFromBug(bug: Bug): FieldsForm {
     severity: bug.severity,
     status: bug.status,
     assigneeId: bug.assigneeId,
-    cycleId: bug.cycleId,
+    sprintId: bug.sprintId,
     moduleId: bug.moduleId ?? "",
+    environmentId: bug.environmentId ?? "",
   };
 }
 
@@ -572,12 +575,13 @@ export function ModuleBugCard({
   bug,
   assigneeName,
   reporterName,
-  cycleName,
+  sprintName,
   moduleName,
   projectName,
   users,
-  cycles,
+  sprints,
   modules,
+  environments,
   canEdit,
   canStatus,
   canComment,
@@ -590,12 +594,13 @@ export function ModuleBugCard({
   bug: Bug;
   assigneeName: string;
   reporterName: string;
-  cycleName: string;
+  sprintName: string;
   moduleName: string;
   projectName: string;
   users: User[];
-  cycles: Cycle[];
+  sprints: Sprint[];
   modules: Module[];
+  environments: Environment[];
   canEdit: boolean;
   canStatus: boolean;
   canComment: boolean;
@@ -671,9 +676,10 @@ export function ModuleBugCard({
         priority: patch.priority ?? bug.priority,
         severity: patch.severity ?? bug.severity,
         assigneeId: bug.assigneeId,
-        cycleId: bug.cycleId,
+        sprintId: bug.sprintId,
         projectId: bug.projectId,
         moduleId: bug.moduleId ?? null,
+        environmentId: bug.environmentId ?? null,
         status: patch.status ?? bug.status,
       }),
     onSuccess: async () => {
@@ -696,9 +702,10 @@ export function ModuleBugCard({
         priority: payload.priority,
         severity: payload.severity,
         assigneeId: payload.assigneeId,
-        cycleId: payload.cycleId,
+        sprintId: payload.sprintId,
         projectId: bug.projectId,
         moduleId: payload.moduleId || null,
+        environmentId: payload.environmentId || null,
         status: payload.status,
       }),
     onSuccess: async () => {
@@ -722,7 +729,7 @@ export function ModuleBugCard({
         priority: bug.priority,
         severity: bug.severity,
         assigneeId: bug.assigneeId,
-        cycleId: bug.cycleId,
+        sprintId: bug.sprintId,
         projectId: bug.projectId,
         moduleId: bug.moduleId ?? null,
         status: bug.status,
@@ -786,8 +793,8 @@ export function ModuleBugCard({
       setError("Title is required");
       return;
     }
-    if (!form.assigneeId || !form.cycleId) {
-      setError("Assignee and cycle are required");
+    if (!form.assigneeId || !form.sprintId) {
+      setError("Assignee and sprint are required");
       return;
     }
     saveFields.mutate(form);
@@ -969,14 +976,14 @@ export function ModuleBugCard({
               </select>
             </label>
             <label className="tb-label">
-              Cycle
+              Sprint
               <select
                 className="tb-select"
-                value={form.cycleId}
-                onChange={(e) => setForm({ ...form, cycleId: e.target.value })}
+                value={form.sprintId}
+                onChange={(e) => setForm({ ...form, sprintId: e.target.value })}
                 required
               >
-                {cycles.map((c) => (
+                {sprints.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                     {c.isDefault ? " (default)" : ""}
@@ -997,6 +1004,24 @@ export function ModuleBugCard({
                     {m.name}
                   </option>
                 ))}
+              </select>
+            </label>
+            <label className="tb-label">
+              Environment
+              <select
+                className="tb-select"
+                value={form.environmentId}
+                onChange={(e) => setForm({ ...form, environmentId: e.target.value })}
+              >
+                <option value="">Not set</option>
+                {environments
+                  .filter((e) => e.active)
+                  .map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.name}
+                      {e.isDefault ? " (default)" : ""}
+                    </option>
+                  ))}
               </select>
             </label>
           </div>
@@ -1402,8 +1427,24 @@ export function ModuleBugCard({
                   <dd>{moduleName}</dd>
                 </div>
                 <div className="tb-bug-side-field">
-                  <dt>Cycle</dt>
-                  <dd>{cycleName}</dd>
+                  <dt>Sprint</dt>
+                  <dd>{sprintName}</dd>
+                </div>
+                <div className="tb-bug-side-field">
+                  <dt>Environment</dt>
+                  <dd>
+                    {bug.environmentName
+                      ? `${bug.environmentName}${bug.environmentSnapshot ? ` · ${bug.environmentSnapshot}` : ""}`
+                      : bug.environmentSnapshot || "—"}
+                  </dd>
+                </div>
+                <div className="tb-bug-side-field">
+                  <dt>ADO</dt>
+                  <dd>
+                    {bug.externalRefs?.adoWorkItemId
+                      ? `#${bug.externalRefs.adoWorkItemId}`
+                      : "—"}
+                  </dd>
                 </div>
                 <div className="tb-bug-side-field">
                   <dt>Reported on</dt>
@@ -1429,7 +1470,7 @@ export function ModuleBugCard({
         </div>
 
         <section className="tb-bug-panel-card">
-            <div className="tb-bug-tabs" role="tablist" aria-label="Bug detail sections">
+          <div className="tb-bug-tabs" role="tablist" aria-label="Bug detail sections">
             {(
               [
                 ["steps", "Steps"],

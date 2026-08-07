@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchCycles, fetchModules, updateBug } from "../api";
+import { fetchEnvironments, fetchModules, fetchSprints, updateBug } from "../api";
 import { useAuth } from "../auth";
 import { queryKeys } from "../queryKeys";
 import type { Bug, BugPriority, BugSeverity, BugStatus, User } from "../types";
@@ -28,8 +28,9 @@ type FieldsForm = {
   severity: BugSeverity;
   status: BugStatus;
   assigneeId: string;
-  cycleId: string;
+  sprintId: string;
   moduleId: string;
+  environmentId: string;
 };
 
 function fieldsFromBug(bug: Bug): FieldsForm {
@@ -40,8 +41,9 @@ function fieldsFromBug(bug: Bug): FieldsForm {
     severity: bug.severity,
     status: bug.status,
     assigneeId: bug.assigneeId,
-    cycleId: bug.cycleId,
+    sprintId: bug.sprintId,
     moduleId: bug.moduleId ?? "",
+    environmentId: bug.environmentId ?? "",
   };
 }
 
@@ -66,15 +68,21 @@ export function EditBugModal({
 
   const projectId = bug?.projectId ?? "";
 
-  const cyclesQuery = useQuery({
-    queryKey: queryKeys.cycles(projectId),
-    queryFn: () => fetchCycles(projectId),
+  const sprintsQuery = useQuery({
+    queryKey: queryKeys.sprints(projectId),
+    queryFn: () => fetchSprints(projectId),
     enabled: open && !!projectId,
   });
 
   const modulesQuery = useQuery({
     queryKey: queryKeys.modules(projectId),
     queryFn: () => fetchModules(projectId),
+    enabled: open && !!projectId,
+  });
+
+  const environmentsQuery = useQuery({
+    queryKey: queryKeys.environments(projectId),
+    queryFn: () => fetchEnvironments(projectId),
     enabled: open && !!projectId,
   });
 
@@ -93,9 +101,10 @@ export function EditBugModal({
         priority: payload.priority,
         severity: payload.severity,
         assigneeId: payload.assigneeId,
-        cycleId: payload.cycleId,
+        sprintId: payload.sprintId,
         projectId: bug.projectId,
         moduleId: payload.moduleId || null,
+        environmentId: payload.environmentId || null,
         status: payload.status,
       });
     },
@@ -127,8 +136,9 @@ export function EditBugModal({
 
   if (!open || !bug || !form) return null;
 
-  const cycles = cyclesQuery.data ?? [];
+  const sprints = sprintsQuery.data ?? [];
   const modules = modulesQuery.data ?? [];
+  const environments = environmentsQuery.data ?? [];
   const assignees = assignableUsers(user, users);
 
   function onSubmit(e: FormEvent) {
@@ -138,8 +148,8 @@ export function EditBugModal({
       setError("Title is required");
       return;
     }
-    if (!form.assigneeId || !form.cycleId) {
-      setError("Assignee and cycle are required");
+    if (!form.assigneeId || !form.sprintId) {
+      setError("Assignee and sprint are required");
       return;
     }
     saveMutation.mutate(form);
@@ -249,7 +259,7 @@ export function EditBugModal({
               </label>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <label className="tb-label">
                 Assignee
                 <select
@@ -267,18 +277,18 @@ export function EditBugModal({
                 </select>
               </label>
               <label className="tb-label">
-                Cycle
+                Sprint
                 <select
                   className="tb-select"
-                  value={form.cycleId}
-                  disabled={busy || cyclesQuery.isLoading}
-                  onChange={(e) => setForm({ ...form, cycleId: e.target.value })}
+                  value={form.sprintId}
+                  disabled={busy || sprintsQuery.isLoading}
+                  onChange={(e) => setForm({ ...form, sprintId: e.target.value })}
                   required
                 >
-                  {cycles.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                      {c.isDefault ? " (default)" : ""}
+                  {sprints.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                      {s.isDefault ? " (default)" : ""}
                     </option>
                   ))}
                 </select>
@@ -295,6 +305,22 @@ export function EditBugModal({
                   {modules.map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="tb-label">
+                Environment
+                <select
+                  className="tb-select"
+                  value={form.environmentId}
+                  disabled={busy || environmentsQuery.isLoading}
+                  onChange={(e) => setForm({ ...form, environmentId: e.target.value })}
+                >
+                  <option value="">None</option>
+                  {environments.map((env) => (
+                    <option key={env.id} value={env.id}>
+                      {env.name}
                     </option>
                   ))}
                 </select>

@@ -1,5 +1,6 @@
 import browser from "webextension-polyfill";
 import { createBug, getToken } from "./api";
+import { detectEnvironmentSnapshot, hostnameFromUrl } from "./environmentSnapshot";
 import {
   EMPTY_SESSION,
   RECORDING_STORAGE_KEY,
@@ -249,6 +250,11 @@ async function uploadBugFromSession(): Promise<{
   }
 
   const meta = session.meta;
+  const environmentSnapshot =
+    meta.environmentSnapshot ||
+    detectEnvironmentSnapshot(
+      hostnameFromUrl(session.steps.at(-1)?.pageUrl ?? session.screenshots?.at(-1)?.pageUrl),
+    );
 
   // Stop recording if still live so upload is consistent
   if (session.status === "recording" || session.status === "paused") {
@@ -261,9 +267,11 @@ async function uploadBugFromSession(): Promise<{
     priority: meta.priority,
     severity: meta.severity,
     assigneeId: meta.assigneeId,
-    cycleId: meta.cycleId,
+    sprintId: meta.sprintId,
     projectId: meta.projectId,
     moduleId: meta.moduleId,
+    environmentId: meta.environmentId,
+    environmentSnapshot,
     status: "NEW",
     steps: session.steps.map((step) => ({
       order: step.order,

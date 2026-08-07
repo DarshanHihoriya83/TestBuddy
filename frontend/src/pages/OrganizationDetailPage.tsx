@@ -3,9 +3,10 @@ import { Link, useParams } from "react-router-dom";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   addOrganizationMember,
+  adminUpdateUser,
+  fetchAdminUsers,
   fetchOrganization,
   fetchOrganizationMembers,
-  fetchUsers,
   removeOrganizationMember,
   updateOrganization,
 } from "../api";
@@ -15,13 +16,18 @@ import { FlashAlert } from "../components/FlashAlert";
 import { MemberList, MemberPicker } from "../components/MemberPicker";
 import { QueryStatus } from "../components/QueryStatus";
 import { Shell } from "../components/Shell";
+import { ChangeRoleModal } from "../components/users/ChangeRoleModal";
 import { queryKeys } from "../queryKeys";
+import type { User, UserRole } from "../types";
 import {
   addableMemberUsers,
+  assignableRoles,
+  canChangeUserRole,
   canCreateOrganization,
   canCreateProject,
   canManageOrgMembers,
   isSuperAdmin,
+  roleLabel,
 } from "../utils/roles";
 import {
   ALPHA_NAME_MAX_LENGTH,
@@ -47,7 +53,11 @@ export function OrganizationDetailPage() {
   const [limitDraft, setLimitDraft] = useState("");
   const [limitHint, setLimitHint] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<{ id: string; name: string } | null>(null);
+  const [roleChangeUser, setRoleChangeUser] = useState<User | null>(null);
+  const [roleChangeError, setRoleChangeError] = useState<string | null>(null);
   const [projectSearch, setProjectSearch] = useState("");
+
+  const assignable = useMemo(() => assignableRoles(user), [user]);
 
   const orgQuery = useQuery({
     queryKey: queryKeys.organization(id),
@@ -60,16 +70,18 @@ export function OrganizationDetailPage() {
     enabled: !!id,
   });
   const usersQuery = useQuery({
-    queryKey: queryKeys.users(),
-    queryFn: () => fetchUsers(),
+    queryKey: queryKeys.usersAdmin(),
+    queryFn: () => fetchAdminUsers(),
     enabled: canManage,
   });
 
-  const members = membersQuery.data ?? [];
+  const members = useMemo(
+    () => (membersQuery.data ?? []).filter((u) => u.role !== "SUPERADMIN"),
+    [membersQuery.data],
+  );
   const memberIds = useMemo(() => new Set(members.map((m) => m.id)), [members]);
   const addable = useMemo(
-    () =>
-      addableMemberUsers(user, usersQuery.data ?? []).filter((u) => !memberIds.has(u.id)),
+    () => addableMemberUsers(user, usersQuery.data ?? []).filter((u) => !memberIds.has(u.id)),
     [user, usersQuery.data, memberIds],
   );
 
@@ -94,6 +106,7 @@ export function OrganizationDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ["organization-members", id] });
       await queryClient.invalidateQueries({ queryKey: ["organization", id] });
       await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.usersAdmin() });
     },
     onError: (err: Error) => {
       setError(err.message);
@@ -110,6 +123,7 @@ export function OrganizationDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ["organization-members", id] });
       await queryClient.invalidateQueries({ queryKey: ["organization", id] });
       await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.usersAdmin() });
     },
     onError: (err: Error) => {
       setError(err.message);
@@ -148,6 +162,20 @@ export function OrganizationDetailPage() {
       setError(err.message);
       setMessage(null);
     },
+  });
+
+  const changeRoleMutation = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: UserRole; userName: string }) =>
+      adminUpdateUser(userId, { role }),
+    onSuccess: async (_data, vars) => {
+      setRoleChangeUser(null);
+      setRoleChangeError(null);
+      setMessage(`${vars.userName} is now ${roleLabel(vars.role)}.`);
+      setError(null);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.organizationMembers(id) });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.usersAdmin() });
+    },
+    onError: (err: Error) => setRoleChangeError(err.message),
   });
 
   const org = orgQuery.data;
@@ -228,8 +256,7 @@ export function OrganizationDetailPage() {
 
   const projectUsed = org?.projectCount ?? projects.length;
   const projectCap = org?.maxProjects;
-  const orgAtLimit =
-    typeof projectCap === "number" && projectUsed >= projectCap;
+  const orgAtLimit = typeof projectCap === "number" && projectUsed >= projectCap;
 
   return (
     <Shell title={org?.name ?? "Organization"}>
@@ -361,7 +388,9 @@ export function OrganizationDetailPage() {
             ) : (
               <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-3xl font-bold tracking-tight text-[var(--ink)]">{org.name}</h2>
+                  <h2 className="text-3xl font-bold tracking-tight text-[var(--ink)]">
+                    {org.name}
+                  </h2>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <span
                       className={`inline-flex items-center rounded-lg bg-white px-2.5 py-1 text-xs font-semibold ring-1 ring-[var(--line)] ${
@@ -413,8 +442,8 @@ export function OrganizationDetailPage() {
                     All projects
                   </Link>
                 )}
-                {canCreateProj && (
-                  orgAtLimit ? (
+                {canCreateProj &&
+                  (orgAtLimit ? (
                     <span
                       className="cursor-not-allowed rounded-lg bg-[var(--panel-elevated)] px-3 py-1.5 text-xs font-semibold text-[var(--muted)] ring-1 ring-[var(--line)]"
                       title="Organization project limit reached"
@@ -428,14 +457,13 @@ export function OrganizationDetailPage() {
                     >
                       + Create project
                     </Link>
-                  )
-                )}
+                  ))}
               </div>
             </div>
 
             {projects.length > 0 && (
               <div className="border-b border-[var(--line)] px-5 py-3.5">
-                <label className="relative block max-w-lg">
+                <div className="relative max-w-lg">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
                       <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
@@ -447,16 +475,16 @@ export function OrganizationDetailPage() {
                       />
                     </svg>
                   </span>
-                  <span className="sr-only">Search projects</span>
                   <input
                     id="org-project-search"
-                    className="tb-input !mt-0 pl-10"
                     type="search"
+                    className="tb-search-input"
                     placeholder="Filter by name, Jira key, or ADO project…"
                     value={projectSearch}
                     onChange={(e) => setProjectSearch(e.target.value)}
+                    aria-label="Search projects"
                   />
-                </label>
+                </div>
               </div>
             )}
 
@@ -474,7 +502,12 @@ export function OrganizationDetailPage() {
                       strokeWidth="1.75"
                     />
                     <path d="M3 9h18" stroke="currentColor" strokeWidth="1.75" />
-                    <path d="M8 14h8" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+                    <path
+                      d="M8 14h8"
+                      stroke="currentColor"
+                      strokeWidth="1.75"
+                      strokeLinecap="round"
+                    />
                   </svg>
                 </div>
                 <p className="mt-4 text-base font-semibold text-[var(--ink)]">No projects yet</p>
@@ -595,9 +628,7 @@ export function OrganizationDetailPage() {
                 <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
                   People
                 </p>
-                <h3 className="mt-1 text-lg font-bold tracking-tight text-[var(--ink)]">
-                  Members
-                </h3>
+                <h3 className="mt-1 text-lg font-bold tracking-tight text-[var(--ink)]">Members</h3>
                 <p className="mt-1 text-sm text-[var(--muted)]">
                   {members.length} {members.length === 1 ? "person" : "people"} in this organization
                 </p>
@@ -627,6 +658,12 @@ export function OrganizationDetailPage() {
                 removing={removeMutation.isPending}
                 confirmBeforeRemove={false}
                 onRemove={(userId, name) => setRemoveTarget({ id: userId, name })}
+                canChangeRole={(member) => canChangeUserRole(user, member)}
+                onChangeRole={(member) => {
+                  setRoleChangeUser(member);
+                  setRoleChangeError(null);
+                }}
+                changingRole={changeRoleMutation.isPending}
                 emptyText="No members yet."
               />
             </div>
@@ -637,11 +674,7 @@ export function OrganizationDetailPage() {
       <ConfirmDialog
         open={!!removeTarget}
         title="Remove member"
-        message={
-          removeTarget
-            ? `Remove "${removeTarget.name}" from this organization?`
-            : ""
-        }
+        message={removeTarget ? `Remove "${removeTarget.name}" from this organization?` : ""}
         confirmLabel="Remove member"
         danger
         busy={removeMutation.isPending}
@@ -650,6 +683,27 @@ export function OrganizationDetailPage() {
         }}
         onConfirm={() => {
           if (removeTarget) removeMutation.mutate(removeTarget.id);
+        }}
+      />
+
+      <ChangeRoleModal
+        user={roleChangeUser}
+        roles={assignable}
+        busy={changeRoleMutation.isPending}
+        error={roleChangeError}
+        onClose={() => {
+          if (!changeRoleMutation.isPending) {
+            setRoleChangeUser(null);
+            setRoleChangeError(null);
+          }
+        }}
+        onSubmit={(role) => {
+          if (!roleChangeUser) return;
+          changeRoleMutation.mutate({
+            userId: roleChangeUser.id,
+            role,
+            userName: roleChangeUser.name,
+          });
         }}
       />
     </Shell>

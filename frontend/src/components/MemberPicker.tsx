@@ -66,6 +66,9 @@ export function MemberList({
   canRemove,
   removing,
   onRemove,
+  canChangeRole,
+  onChangeRole,
+  changingRole,
   emptyText,
   /** When false, parent owns confirmation UI (e.g. ConfirmDialog). Default true. */
   confirmBeforeRemove = true,
@@ -75,6 +78,9 @@ export function MemberList({
   canRemove?: boolean;
   removing?: boolean;
   onRemove?: (userId: string, name: string) => void;
+  canChangeRole?: (member: User) => boolean;
+  onChangeRole?: (member: User) => void;
+  changingRole?: boolean;
   emptyText?: string;
   confirmBeforeRemove?: boolean;
 }) {
@@ -98,19 +104,31 @@ export function MemberList({
             <p className="truncate text-xs text-[var(--muted)]">{m.email}</p>
           </div>
           <span className={`tb-role-chip ${ROLE_CHIP[m.role]}`}>{roleLabel(m.role)}</span>
-          {canRemove && onRemove ? (
-            <button
-              type="button"
-              className="tb-btn-ghost text-xs text-rose-600"
-              disabled={removing}
-              onClick={() => {
-                if (confirmBeforeRemove && !window.confirm(`Remove ${m.name}?`)) return;
-                onRemove(m.id, m.name);
-              }}
-            >
-              Remove
-            </button>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {canChangeRole?.(m) && onChangeRole ? (
+              <button
+                type="button"
+                className="tb-btn-ghost text-xs"
+                disabled={changingRole}
+                onClick={() => onChangeRole(m)}
+              >
+                Change role
+              </button>
+            ) : null}
+            {canRemove && onRemove ? (
+              <button
+                type="button"
+                className="tb-btn-ghost text-xs text-rose-600"
+                disabled={removing}
+                onClick={() => {
+                  if (confirmBeforeRemove && !window.confirm(`Remove ${m.name}?`)) return;
+                  onRemove(m.id, m.name);
+                }}
+              >
+                Remove
+              </button>
+            ) : null}
+          </div>
         </div>
       ))}
     </div>

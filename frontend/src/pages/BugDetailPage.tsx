@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import {
   fetchBug,
-  fetchCycles,
+  fetchEnvironments,
   fetchModules,
   fetchProjects,
+  fetchSprints,
   fetchUsers,
 } from "../api";
 import { useAuth } from "../auth";
@@ -25,7 +26,7 @@ import {
 function breadcrumbLabel(text: string, max = 52) {
   const t = text.trim();
   if (t.length <= max) return t;
-  return `${t.slice(0, max - 1)}ï¿½`;
+  return `${t.slice(0, max - 1)}…`;
 }
 
 export function BugDetailPage() {
@@ -55,9 +56,9 @@ export function BugDetailPage() {
   });
 
   const projectId = bugQuery.data?.projectId ?? projectsQuery.data?.[0]?.id;
-  const cyclesQuery = useQuery({
-    queryKey: queryKeys.cycles(projectId || "_"),
-    queryFn: () => fetchCycles(projectId!),
+  const sprintsQuery = useQuery({
+    queryKey: queryKeys.sprints(projectId || "_"),
+    queryFn: () => fetchSprints(projectId!),
     enabled: !!projectId,
   });
   const modulesQuery = useQuery({
@@ -65,14 +66,19 @@ export function BugDetailPage() {
     queryFn: () => fetchModules(projectId!),
     enabled: !!projectId,
   });
+  const environmentsQuery = useQuery({
+    queryKey: queryKeys.environments(projectId || "_"),
+    queryFn: () => fetchEnvironments(projectId!),
+    enabled: !!projectId,
+  });
 
   const bug = bugQuery.data;
   const nameOf = (uid: string) => usersQuery.data?.find((u) => u.id === uid)?.name ?? uid.slice(0, 8);
-  const cycleName = cyclesQuery.data?.find((c) => c.id === bug?.cycleId)?.name ?? "-";
+  const sprintName = sprintsQuery.data?.find((c) => c.id === bug?.sprintId)?.name ?? "—";
   const moduleName =
     modulesQuery.data?.find((m) => m.id === bug?.moduleId)?.name ??
-    (bug?.moduleId ? bug.moduleId.slice(0, 8) : "-");
-  const projectName = projectsQuery.data?.find((p) => p.id === bug?.projectId)?.name ?? "-";
+    (bug?.moduleId ? bug.moduleId.slice(0, 8) : "—");
+  const projectName = projectsQuery.data?.find((p) => p.id === bug?.projectId)?.name ?? "—";
   const backToProject = fromProjectId || bug?.projectId;
   const backToModule =
     fromModuleId && backToProject
@@ -153,12 +159,13 @@ export function BugDetailPage() {
               bug={bug}
               assigneeName={nameOf(bug.assigneeId)}
               reporterName={nameOf(bug.reporterId)}
-              cycleName={cycleName}
+              sprintName={sprintName}
               moduleName={moduleName}
               projectName={projectName}
               users={usersQuery.data ?? []}
-              cycles={cyclesQuery.data ?? []}
+              sprints={sprintsQuery.data ?? []}
               modules={modulesQuery.data ?? []}
+              environments={environmentsQuery.data ?? []}
               canEdit={canEdit}
               canStatus={canStatus}
               canComment={canComment}

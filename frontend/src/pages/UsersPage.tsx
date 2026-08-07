@@ -106,10 +106,16 @@ export function UsersPage() {
   }, [allUsers, me]);
 
   const roleCounts = useMemo(() => {
-    const map: Record<string, number> = { ALL: visibleUsers.length };
+    // SuperAdmin is reserved — leave it out of every role-filter count,
+    // including "All roles". Managers already exclude them via visibleUsers.
+    let all = 0;
+    const map: Record<string, number> = {};
     for (const u of visibleUsers) {
+      if (u.role === "SUPERADMIN") continue;
+      all += 1;
       map[u.role] = (map[u.role] || 0) + 1;
     }
+    map.ALL = all;
     return map;
   }, [visibleUsers]);
 
@@ -271,7 +277,7 @@ export function UsersPage() {
       return;
     }
     if (isSuperAdmin(me) && access && !access.organizationId) {
-      setEditError("Select an organization");
+      setEditError("Select an organization to save access changes");
       return;
     }
     setEditError(null);
@@ -296,29 +302,15 @@ export function UsersPage() {
 
   return (
     <Shell title="Users">
-      {/* shrink-0: the Shell scroller is a flex column, so without it this block
-          is squeezed to the viewport and taller content risks being clipped. */}
-      <div className="flex min-h-0 shrink-0 flex-col gap-3 pb-4">
+      {/* Fill the Shell viewport: filters + column header stay put;
+          user rows and pagination scroll together inside the card. */}
+      <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden pb-1">
         <div className="shrink-0 space-y-3">
           <PageHeader
             description={
               canFullUserAdmin
                 ? "Create users, change roles, and manage account status."
                 : "Browse users in your organizations."
-            }
-            actions={
-              canFullUserAdmin ? (
-                <button
-                  type="button"
-                  className="tb-btn-primary text-sm"
-                  onClick={() => {
-                    setShowCreate(true);
-                    setError(null);
-                  }}
-                >
-                  Create user
-                </button>
-              ) : null
             }
           />
 
@@ -400,18 +392,36 @@ export function UsersPage() {
             roleCounts={roleCounts}
             filtersDirty={filtersDirty}
             onClear={clearFilters}
+            actions={
+              canFullUserAdmin ? (
+                <button
+                  type="button"
+                  className="tb-btn-primary text-sm"
+                  onClick={() => {
+                    setShowCreate(true);
+                    setError(null);
+                  }}
+                >
+                  Create user
+                </button>
+              ) : null
+            }
           />
         </div>
 
-        <div className="tb-card shrink-0 overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--line)] px-4 py-3">
-            <h3 className="text-sm font-bold text-[var(--ink)]">
-              {projectFilter ? "Project members" : "Users"}
-              <span className="ml-2 font-semibold text-[var(--muted)]">
-                ({filtered.length}
-                {filtered.length !== visibleUsers.length ? ` of ${visibleUsers.length}` : ""})
-              </span>
-            </h3>
+        <div className="tb-card tb-user-table flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--line)] bg-[var(--bg0)] px-4 py-3">
+            <div className="min-w-0">
+              <h3 className="text-sm font-bold tracking-tight text-[var(--ink)]">
+                {projectFilter ? "Project members" : "Directory"}
+              </h3>
+              <p className="text-xs text-[var(--muted)]">
+                {filtered.length} user{filtered.length === 1 ? "" : "s"}
+                {filtered.length !== visibleUsers.length
+                  ? ` · filtered from ${visibleUsers.length}`
+                  : ""}
+              </p>
+            </div>
           </div>
 
           <QueryStatus
@@ -419,7 +429,7 @@ export function UsersPage() {
             error={usersQuery.error}
             onRetry={() => void usersQuery.refetch()}
             loadingText="Loading users…"
-            className="m-4"
+            className="m-4 shrink-0"
           />
 
           {!usersQuery.isLoading && filtered.length === 0 && (
@@ -441,142 +451,143 @@ export function UsersPage() {
           )}
 
           {!usersQuery.isLoading && filtered.length > 0 && (
-            <div className="tb-user-head">
-              <span className="min-w-0 flex-1">User</span>
-              <span className="tb-user-col-role">Designation</span>
-              <span className="tb-user-col-status">Status</span>
-              <span className="tb-user-col-actions">Actions</span>
-            </div>
-          )}
+            <>
+              <div className="tb-user-head shrink-0">
+                <span>User</span>
+                <span>Designation</span>
+                <span>Status</span>
+                <span className="text-right">Actions</span>
+              </div>
 
-          <div className="divide-y divide-[var(--line)]">
-            {pageItems.map((u) => (
-              <div key={u.id} className="tb-user-row">
-                <div className="flex min-w-0 flex-1 items-center gap-3">
-                  <span className="tb-user-avatar" aria-hidden>
-                    {userInitials(u.name)}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-[var(--ink)]">
-                      {u.name}
-                      {u.id === me?.id ? (
-                        <span className="ml-2 text-xs font-medium text-[var(--accent)]">(you)</span>
-                      ) : null}
-                    </p>
-                    <p className="truncate text-xs text-[var(--muted)]">{u.email}</p>
-                  </div>
-                </div>
-                <div className="tb-user-col-role">
-                  <span className={`tb-role-chip ${ROLE_CHIP_CLASS[u.role] ?? ""}`}>
-                    {roleLabel(u.role)}
-                  </span>
-                </div>
-                <div className="tb-user-col-status">
-                  <span
-                    className={`tb-status-pill ${u.active === false ? "is-inactive" : "is-active"}`}
-                  >
-                    <span className="tb-status-dot" aria-hidden />
-                    {u.active === false ? "Inactive" : "Active"}
-                  </span>
-                </div>
-                <div className="tb-user-col-actions">
-                  {canChangeUserRole(me, u) && (
-                    <button
-                      type="button"
-                      className="tb-btn-ghost text-xs"
-                      onClick={() => {
-                        setRoleChangeUser(u);
-                        setRoleChangeError(null);
-                        setEditing(null);
-                        setShowCreate(false);
-                        setError(null);
-                      }}
-                    >
-                      Change role
-                    </button>
-                  )}
-                  {(() => {
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <div>
+                  {pageItems.map((u) => {
+                    const roleChip = ROLE_CHIP_CLASS[u.role] ?? "";
+                    const isYou = u.id === me?.id;
+                    const inactive = u.active === false;
                     const canManageTarget = canManageUserAccount(me, u);
                     const canEditTarget = canFullUserAdmin && canManageTarget;
                     const canResetTarget =
-                      canFullUserAdmin &&
-                      u.id !== me?.id &&
-                      u.active !== false &&
-                      canManageTarget;
-                    const canStatusTarget =
-                      canFullUserAdmin && u.id !== me?.id && canManageTarget;
-                    const canHardDelete =
-                      isSuperAdmin(me) && u.id !== me?.id && u.active === false;
-                    if (!canEditTarget && !canResetTarget && !canStatusTarget && !canHardDelete) {
-                      return null;
-                    }
+                      canFullUserAdmin && !isYou && !inactive && canManageTarget;
+                    const canStatusTarget = canFullUserAdmin && !isYou && canManageTarget;
+                    const canHardDelete = isSuperAdmin(me) && !isYou && inactive;
                     return (
-                      <UserActionsMenu
-                        user={u}
-                        canEdit={canEditTarget}
-                        canResetPassword={canResetTarget}
-                        canChangeStatus={canStatusTarget}
-                        canDeleteForever={canHardDelete}
-                        busy={
-                          deleteMutation.isPending ||
-                          activateMutation.isPending ||
-                          hardDeleteMutation.isPending
-                        }
-                        onEdit={() => {
-                          setEditing(u);
-                          setError(null);
-                          setShowCreate(false);
-                          setRoleChangeUser(null);
-                        }}
-                        onResetPassword={() => {
-                          setResetUser(u);
-                          setError(null);
-                          setMessage(null);
-                          setShowCreate(false);
-                          setEditing(null);
-                          setRoleChangeUser(null);
-                        }}
-                        onActivate={() => {
-                          activateMutation.mutate({ id: u.id, userName: u.name });
-                        }}
-                        onDeactivate={() => {
-                          if (
-                            window.confirm(
-                              `Deactivate ${u.name}? Their existing sessions will stop working and they will no longer be able to sign in.`,
-                            )
-                          ) {
-                            deleteMutation.mutate({ id: u.id, userName: u.name });
-                          }
-                        }}
-                        onDeleteForever={() => {
-                          if (
-                            window.confirm(
-                              `Permanently delete ${u.name}? This cannot be undone. Bug history will keep their name as an ID only.`,
-                            )
-                          ) {
-                            hardDeleteMutation.mutate(u.id);
-                          }
-                        }}
-                      />
+                      <div
+                        key={u.id}
+                        className={`tb-user-row ${isYou ? "is-you" : ""} ${
+                          inactive ? "is-inactive" : ""
+                        }`}
+                      >
+                        <div className="tb-user-identity">
+                          <span className={`tb-user-avatar ${roleChip}`} aria-hidden>
+                            {userInitials(u.name)}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-[var(--ink)]">
+                              {u.name}
+                              {isYou ? <span className="tb-user-you">You</span> : null}
+                            </p>
+                            <p className="truncate text-xs text-[var(--muted)]">{u.email}</p>
+                          </div>
+                        </div>
+                        <div className="tb-user-col-role">
+                          <span className={`tb-role-chip ${roleChip}`}>{roleLabel(u.role)}</span>
+                        </div>
+                        <div className="tb-user-col-status">
+                          <span
+                            className={`tb-status-pill ${inactive ? "is-inactive" : "is-active"}`}
+                          >
+                            <span className="tb-status-dot" aria-hidden />
+                            {inactive ? "Inactive" : "Active"}
+                          </span>
+                        </div>
+                        <div className="tb-user-col-actions">
+                          {canChangeUserRole(me, u) && (
+                            <button
+                              type="button"
+                              className="tb-btn-ghost tb-user-action-btn text-xs"
+                              onClick={() => {
+                                setRoleChangeUser(u);
+                                setRoleChangeError(null);
+                                setEditing(null);
+                                setShowCreate(false);
+                                setError(null);
+                              }}
+                            >
+                              Change role
+                            </button>
+                          )}
+                          {(canEditTarget ||
+                            canResetTarget ||
+                            canStatusTarget ||
+                            canHardDelete) && (
+                            <UserActionsMenu
+                              user={u}
+                              canEdit={canEditTarget}
+                              canResetPassword={canResetTarget}
+                              canChangeStatus={canStatusTarget}
+                              canDeleteForever={canHardDelete}
+                              busy={
+                                deleteMutation.isPending ||
+                                activateMutation.isPending ||
+                                hardDeleteMutation.isPending
+                              }
+                              onEdit={() => {
+                                setEditing(u);
+                                setError(null);
+                                setShowCreate(false);
+                                setRoleChangeUser(null);
+                              }}
+                              onResetPassword={() => {
+                                setResetUser(u);
+                                setError(null);
+                                setMessage(null);
+                                setShowCreate(false);
+                                setEditing(null);
+                                setRoleChangeUser(null);
+                              }}
+                              onActivate={() => {
+                                activateMutation.mutate({ id: u.id, userName: u.name });
+                              }}
+                              onDeactivate={() => {
+                                if (
+                                  window.confirm(
+                                    `Deactivate ${u.name}? Their existing sessions will stop working and they will no longer be able to sign in.`,
+                                  )
+                                ) {
+                                  deleteMutation.mutate({ id: u.id, userName: u.name });
+                                }
+                              }}
+                              onDeleteForever={() => {
+                                if (
+                                  window.confirm(
+                                    `Permanently delete ${u.name}? This cannot be undone. Bug history will keep their name as an ID only.`,
+                                  )
+                                ) {
+                                  hardDeleteMutation.mutate(u.id);
+                                }
+                              }}
+                            />
+                          )}
+                        </div>
+                      </div>
                     );
-                  })()}
+                  })}
                 </div>
-              </div>
-            ))}
-          </div>
 
-          {filtered.length > 0 && (
-            <Pagination
-              page={safePage}
-              pageSize={pageSize}
-              totalItems={filtered.length}
-              startIdx={startIdx}
-              endIdx={endIdx}
-              totalPages={totalPages}
-              itemLabel="users"
-              onPage={setPage}
-              onPageSize={setPageSize}
-            />
+                <Pagination
+                  page={safePage}
+                  pageSize={pageSize}
+                  totalItems={filtered.length}
+                  startIdx={startIdx}
+                  endIdx={endIdx}
+                  totalPages={totalPages}
+                  itemLabel="users"
+                  onPage={setPage}
+                  onPageSize={setPageSize}
+                />
+              </div>
+            </>
           )}
         </div>
       </div>

@@ -241,6 +241,11 @@ function EditUserDialog({
   const originalActive = original.active !== false;
   const originalAccess = originalAccessRef.current;
 
+  const accessDirty =
+    requireOrganization &&
+    (organizationId !== originalAccess.organizationId ||
+      !sameIdSet(projectIds, originalAccess.projectIds));
+
   const changes = useMemo(() => {
     const list: string[] = [];
     if (editing.name.trim() !== original.name.trim()) list.push("name");
@@ -252,7 +257,11 @@ function EditUserDialog({
     if (requireOrganization && organizationId !== originalAccess.organizationId) {
       list.push("organization");
     }
-    if (requireOrganization && !sameIdSet(projectIds, originalAccess.projectIds)) {
+    if (
+      requireOrganization &&
+      organizationId &&
+      !sameIdSet(projectIds, originalAccess.projectIds)
+    ) {
       list.push("projects");
     }
     return list;
@@ -308,11 +317,24 @@ function EditUserDialog({
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (busy || membershipLoading) return;
-    if (requireOrganization && !organizationId) {
+    if (!requireOrganization) {
+      onSubmit(e, undefined);
+      return;
+    }
+    const syncingAccess =
+      organizationId !== originalAccess.organizationId ||
+      !sameIdSet(projectIds, originalAccess.projectIds);
+    // Profile-only saves skip access sync — orphan users can be edited first,
+    // then assigned to any organization from the dropdown.
+    if (syncingAccess && organizationId) {
+      onSubmit(e, { organizationId, projectIds });
+      return;
+    }
+    if (syncingAccess && !organizationId) {
       onSubmit(e, { organizationId: "", projectIds });
       return;
     }
-    onSubmit(e, requireOrganization ? { organizationId, projectIds } : undefined);
+    onSubmit(e, undefined);
   }
 
   function resetAll() {
@@ -408,7 +430,14 @@ function EditUserDialog({
         </Section>
 
         {requireOrganization && (
-          <Section title="Organization" hint="Scopes the projects available below">
+          <Section
+            title="Organization"
+            hint={
+              !originalAccess.organizationId
+                ? "This user is not in any organization yet — pick one to assign access"
+                : "Scopes the projects available below"
+            }
+          >
             <FieldWithIcon label="Organization" required icon={<IconShield />}>
               <select
                 className="tb-select"
@@ -579,11 +608,7 @@ function EditUserDialog({
             form={FORM_ID}
             className="tb-btn-primary text-sm"
             disabled={
-              busy ||
-              membershipLoading ||
-              !dirty ||
-              invalid ||
-              (requireOrganization && !organizationId)
+              busy || membershipLoading || !dirty || invalid || (accessDirty && !organizationId)
             }
           >
             {busy ? "Saving…" : "Save changes"}

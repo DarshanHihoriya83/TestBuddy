@@ -28,7 +28,7 @@ import {
 
   fetchBugs,
 
-  fetchCycles,
+  fetchSprints,
 
   fetchModules,
 
@@ -1006,11 +1006,11 @@ export function ProjectsPage() {
 
   });
 
-  const exportCyclesQuery = useQuery({
+  const exportSprintsQuery = useQuery({
 
-    queryKey: queryKeys.cycles(exportProjectId),
+    queryKey: queryKeys.sprints(exportProjectId),
 
-    queryFn: () => fetchCycles(exportProjectId),
+    queryFn: () => fetchSprints(exportProjectId),
 
     enabled: !!exportProjectId,
 
@@ -1036,7 +1036,7 @@ export function ProjectsPage() {
 
       exportBugsQuery.isPending ||
 
-      exportCyclesQuery.isPending ||
+      exportSprintsQuery.isPending ||
 
       exportMembersQuery.isPending);
 
@@ -1064,7 +1064,7 @@ export function ProjectsPage() {
 
           { label: "Bugs", value: String(exportBugsQuery.data?.length ?? 0) },
 
-          { label: "Cycles", value: String(exportCyclesQuery.data?.length ?? 0) },
+          { label: "Sprints", value: String(exportSprintsQuery.data?.length ?? 0) },
 
           { label: "Members", value: String(exportMembersQuery.data?.length ?? 0) },
 
@@ -1180,7 +1180,7 @@ export function ProjectsPage() {
 
       setCreateOpen(false);
 
-      notifySuccess("Project created (Cycle 1 added as default)");
+      notifySuccess("Project created (Sprint 1 added as default)");
 
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
 

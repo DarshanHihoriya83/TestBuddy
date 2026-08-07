@@ -17,7 +17,8 @@ export const queryKeys = {
   project: (id: string) => ["project", id] as const,
   projectMembers: (id: string) => ["project-members", id] as const,
   modules: (projectId: string) => ["modules", projectId] as const,
-  cycles: (projectId: string) => ["cycles", projectId] as const,
+  sprints: (projectId: string) => ["sprints", projectId] as const,
+  environments: (projectId: string) => ["environments", projectId] as const,
   bugs: (filters?: BugFilters | { projectId?: string }) =>
     filters ? (["bugs", filters] as const) : (["bugs"] as const),
   bug: (id: string) => ["bug", id] as const,

@@ -386,6 +386,60 @@ export async function ensureSchema() {
   `);
 
   await query(`
+    CREATE TABLE IF NOT EXISTS environments (
+      id UUID PRIMARY KEY,
+      project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name VARCHAR(255) NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_default BOOLEAN NOT NULL DEFAULT false,
+      active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS environments_project_name_active
+    ON environments (project_id, lower(name))
+    WHERE active = true
+  `);
+
+  await query(`
+    ALTER TABLE bugs
+    ADD COLUMN IF NOT EXISTS environment_id UUID
+  `);
+  await query(`
+    ALTER TABLE bugs
+    ADD COLUMN IF NOT EXISTS environment_snapshot VARCHAR(500)
+  `);
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'bugs_environment_id_fkey'
+      ) THEN
+        ALTER TABLE bugs
+          ADD CONSTRAINT bugs_environment_id_fkey
+          FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE SET NULL;
+      END IF;
+    END $$;
+  `);
+
+  // Seed a default Dev environment for projects that have none yet.
+  await query(`
+    DO $$
+    DECLARE
+      p RECORD;
+    BEGIN
+      FOR p IN SELECT id FROM projects LOOP
+        IF NOT EXISTS (SELECT 1 FROM environments WHERE project_id = p.id) THEN
+          INSERT INTO environments (id, project_id, name, sort_order, is_default, active)
+          VALUES (gen_random_uuid(), p.id, 'Dev', 0, true, true);
+        END IF;
+      END LOOP;
+    END $$;
+  `);
+
+  await query(`
     CREATE TABLE IF NOT EXISTS test_cases (
       id UUID PRIMARY KEY,
       title VARCHAR(255) NOT NULL,
@@ -405,5 +459,55 @@ export async function ensureSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+
+  // Sprints = evolved cycles (ADO-linked). Keep table name `cycles` for existing DBs.
+  await query(`
+    ALTER TABLE cycles
+    ADD COLUMN IF NOT EXISTS ado_iteration_id VARCHAR(255)
+  `);
+  await query(`
+    ALTER TABLE cycles
+    ADD COLUMN IF NOT EXISTS ado_iteration_path VARCHAR(500)
+  `);
+  await query(`
+    ALTER TABLE cycles
+    ADD COLUMN IF NOT EXISTS source VARCHAR(32) NOT NULL DEFAULT 'MANUAL'
+  `);
+  await query(`
+    ALTER TABLE cycles
+    ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ
+  `);
+  await query(`
+    ALTER TABLE cycles
+    ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true
+  `);
+
+  await query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS ado_team VARCHAR(255)
+  `);
+  await query(`
+    ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS ado_pat_encrypted TEXT
+  `);
+
+  await query(`
+    ALTER TABLE bugs
+    ADD COLUMN IF NOT EXISTS ado_work_item_url VARCHAR(1000)
+  `);
+  await query(`
+    ALTER TABLE bugs
+    ADD COLUMN IF NOT EXISTS ado_last_synced_at TIMESTAMPTZ
+  `);
+  await query(`
+    ALTER TABLE bug_comments
+    ADD COLUMN IF NOT EXISTS ado_comment_id VARCHAR(255)
+  `);
+
+  // Rename default seed labels Cycle 1 → Sprint 1 for display consistency.
+  await query(`
+    UPDATE cycles SET name = 'Sprint 1'
+    WHERE name = 'Cycle 1' AND source = 'MANUAL'
   `);
 }

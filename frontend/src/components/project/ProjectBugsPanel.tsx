@@ -7,7 +7,7 @@ import { QueryStatus } from "../QueryStatus";
 export function ProjectBugsPanel({
   bugs,
   nameOf,
-  cycleName,
+  sprintName,
   moduleName,
   selectedIds,
   loading,
@@ -25,7 +25,7 @@ export function ProjectBugsPanel({
   bugs: Bug[];
   projectName: string;
   nameOf: (id: string) => string;
-  cycleName: (id: string) => string;
+  sprintName: (id: string) => string;
   moduleName?: (id: string | null | undefined) => string;
   selectedIds: Set<string>;
   loading?: boolean;
@@ -116,7 +116,7 @@ export function ProjectBugsPanel({
               bug={bug}
               assigneeName={nameOf(bug.assigneeId)}
               reporterName={nameOf(bug.reporterId)}
-              cycleName={cycleName(bug.cycleId)}
+              sprintName={sprintName(bug.sprintId)}
               moduleName={moduleName?.(bug.moduleId) || undefined}
               collapsible
               defaultOpen={!!moduleFilterActive && bugs.length <= 5}

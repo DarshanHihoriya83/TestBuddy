@@ -7,7 +7,7 @@ import {
   updateTestCase,
 } from "../../api";
 import type {
-  Cycle,
+  Sprint,
   TestCase,
   TestCaseExecutionStatus,
   TestCasePriority,
@@ -314,7 +314,7 @@ export function ModuleTestCasesPanel({
   testCases,
   loading,
   users,
-  cycles,
+  sprints,
   currentUser,
   selectedIds,
   onToggleOne,
@@ -332,7 +332,7 @@ export function ModuleTestCasesPanel({
   testCases: TestCase[];
   loading?: boolean;
   users: User[];
-  cycles: Cycle[];
+  sprints: Sprint[];
   currentUser: AuthUser | null;
   selectedIds: Set<string>;
   onToggleOne: (id: string, selected: boolean) => void;
@@ -347,7 +347,7 @@ export function ModuleTestCasesPanel({
   const queryClient = useQueryClient();
   const canManage = canCreateBug(currentUser);
   const canDelete = canDeleteBug(currentUser);
-  const defaultCycleId = cycles.find((c) => c.isDefault)?.id ?? cycles[0]?.id ?? "";
+  const defaultSprintId = sprints.find((c) => c.isDefault)?.id ?? sprints[0]?.id ?? "";
   const col = (key: string) => viewPrefs.columns[key] !== false;
   const isGrid = viewPrefs.viewMode === "grid";
 
@@ -497,7 +497,7 @@ export function ModuleTestCasesPanel({
         ],
         projectId,
         moduleId,
-        cycleId: defaultCycleId,
+        sprintId: defaultSprintId,
         assigneeId: assigneeId || null,
       }),
     onSuccess: async () => {
@@ -519,7 +519,7 @@ export function ModuleTestCasesPanel({
         priority,
         executionStatus,
         preconditions: preconditions.trim() || null,
-        cycleId: editTc.cycleId || defaultCycleId,
+        sprintId: editTc.sprintId || defaultSprintId,
         moduleId,
         assigneeId: assigneeId || null,
       });
@@ -545,8 +545,8 @@ export function ModuleTestCasesPanel({
 
   function submitCreate(e: FormEvent) {
     e.preventDefault();
-    if (!title.trim() || !defaultCycleId) {
-      notifyError("Title and a project cycle are required");
+    if (!title.trim() || !defaultSprintId) {
+      notifyError("Title and a project sprint are required");
       return;
     }
     createMutation.mutate();

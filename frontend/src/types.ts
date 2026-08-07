@@ -48,6 +48,8 @@ export interface Project {
   jiraProjectKey?: string;
   adoOrgUrl?: string;
   adoProject?: string;
+  adoTeam?: string | null;
+  adoPatConfigured?: boolean;
   createdBy?: string | null;
   createdAt?: string;
 }
@@ -87,13 +89,31 @@ export interface BugComment {
   createdAt: string;
 }
 
-export interface Cycle {
+export interface Sprint {
   id: string;
   projectId: string;
   name: string;
   isDefault: boolean;
   startDate?: string;
   endDate?: string;
+  active?: boolean;
+  source?: "MANUAL" | "ADO" | string;
+  adoIterationId?: string | null;
+  adoIterationPath?: string | null;
+  lastSyncedAt?: string | null;
+}
+
+/** @deprecated Use Sprint — kept temporarily for gradual migration. */
+export type Cycle = Sprint;
+
+export interface Environment {
+  id: string;
+  projectId: string;
+  name: string;
+  sortOrder: number;
+  isDefault: boolean;
+  active: boolean;
+  createdAt?: string;
 }
 
 export interface Step {
@@ -130,13 +150,21 @@ export interface Bug {
   severity: BugSeverity;
   assigneeId: string;
   reporterId: string;
-  cycleId: string;
+  sprintId: string;
   projectId: string;
   moduleId?: string | null;
+  environmentId?: string | null;
+  environmentName?: string | null;
+  environmentSnapshot?: string | null;
   status: BugStatus;
   steps: Step[];
   screenshots?: BugScreenshot[];
-  externalRefs?: { jiraIssueKey?: string; adoWorkItemId?: string };
+  externalRefs?: {
+    jiraIssueKey?: string;
+    adoWorkItemId?: string;
+    adoWorkItemUrl?: string | null;
+  };
+  adoLastSyncedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -146,9 +174,10 @@ export interface BugFilters {
   priority?: BugPriority | "";
   severity?: BugSeverity | "";
   assigneeId?: string;
-  cycleId?: string;
+  sprintId?: string;
   status?: BugStatus | "";
   moduleId?: string;
+  environmentId?: string;
 }
 
 export interface TestCaseStep {
@@ -170,7 +199,7 @@ export interface TestCase {
   generatedByAi: boolean;
   projectId: string;
   moduleId?: string | null;
-  cycleId: string;
+  sprintId: string;
   assigneeId?: string | null;
   linkedBugId?: string | null;
   createdAt: string;

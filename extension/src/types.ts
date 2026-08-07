@@ -22,6 +22,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  active?: boolean;
   mustChangePassword?: boolean;
 }
 
@@ -33,13 +34,25 @@ export interface Project {
   adoProject?: string;
 }
 
-export interface Cycle {
+export interface Sprint {
   id: string;
   projectId: string;
   name: string;
   isDefault: boolean;
   startDate?: string;
   endDate?: string;
+}
+
+/** @deprecated Use Sprint */
+export type Cycle = Sprint;
+
+export interface Environment {
+  id: string;
+  projectId: string;
+  name: string;
+  sortOrder: number;
+  isDefault: boolean;
+  active: boolean;
 }
 
 export interface Step {
@@ -75,9 +88,12 @@ export interface Bug {
   severity: BugSeverity;
   assigneeId: string;
   reporterId: string;
-  cycleId: string;
+  sprintId: string;
   projectId: string;
   moduleId?: string | null;
+  environmentId?: string | null;
+  environmentName?: string | null;
+  environmentSnapshot?: string | null;
   status: BugStatus;
   steps: Step[];
   screenshots?: {
@@ -87,7 +103,12 @@ export interface Bug {
     url: string;
     createdAt: string;
   }[];
-  externalRefs?: { jiraIssueKey?: string; adoWorkItemId?: string };
+  externalRefs?: {
+    jiraIssueKey?: string;
+    adoWorkItemId?: string;
+    adoWorkItemUrl?: string | null;
+  };
+  adoLastSyncedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -98,9 +119,11 @@ export interface BugCreateRequest {
   priority: BugPriority;
   severity: BugSeverity;
   assigneeId: string;
-  cycleId: string;
+  sprintId: string;
   projectId: string;
   moduleId?: string;
+  environmentId?: string;
+  environmentSnapshot?: string;
   status?: BugStatus;
   steps?: Step[];
   screenshots?: {

@@ -1,5 +1,5 @@
 import browser from "webextension-polyfill";
-import type { Bug, BugCreateRequest, Cycle, Module, Project, User } from "./types";
+import type { Bug, BugCreateRequest, Environment, Module, Project, Sprint, User } from "./types";
 
 const DEFAULT_API = "http://localhost:8080";
 
@@ -92,8 +92,12 @@ export function login(email: string, password: string, apiBase: string) {
 export const fetchMe = () => api<User>("/api/auth/me");
 export const fetchUsers = () => api<User[]>("/api/users");
 export const fetchProjects = () => api<Project[]>("/api/projects");
-export const fetchCycles = (projectId: string) =>
-  api<Cycle[]>(`/api/cycles?projectId=${projectId}`);
+export const fetchSprints = (projectId: string) =>
+  api<Sprint[]>(`/api/sprints?projectId=${encodeURIComponent(projectId)}`);
+/** @deprecated Use fetchSprints */
+export const fetchCycles = (projectId: string) => fetchSprints(projectId);
+export const fetchEnvironments = (projectId: string) =>
+  api<Environment[]>(`/api/projects/${projectId}/environments`);
 export const fetchModules = (projectId: string) =>
   api<Module[]>(`/api/projects/${projectId}/modules`);
 export const createBug = (body: BugCreateRequest) =>

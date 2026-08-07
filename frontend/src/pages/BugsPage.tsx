@@ -5,7 +5,7 @@ import {
   deleteBug,
   exportBugsJson,
   fetchBugs,
-  fetchCycles,
+  fetchSprints,
   fetchModules,
   fetchProjects,
   fetchUsers,
@@ -38,7 +38,7 @@ function toImportPayload(bugs: Bug[]) {
     priority: bug.priority,
     severity: bug.severity,
     assigneeId: bug.assigneeId,
-    cycleId: bug.cycleId,
+    sprintId: bug.sprintId,
     projectId: bug.projectId,
     status: bug.status,
     steps: bug.steps ?? [],
@@ -52,13 +52,13 @@ export function BugsPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const canImport = canCreateBug(user);
   const canDelete = canDeleteBug(user);
-  const showCycleFilter = user?.role !== "TESTER";
+  const showSprintFilter = user?.role !== "TESTER";
   const [filters, setFilters] = useState<BugFilters>({
     projectId: searchParams.get("projectId") ?? "",
     priority: "",
     severity: "",
     assigneeId: "",
-    cycleId: "",
+    sprintId: "",
     status: "",
     moduleId: "",
   });
@@ -69,7 +69,7 @@ export function BugsPage() {
   useEffect(() => {
     const fromUrl = searchParams.get("projectId") ?? "";
     setFilters((f) =>
-      f.projectId === fromUrl ? f : { ...f, projectId: fromUrl, cycleId: "", moduleId: "" },
+      f.projectId === fromUrl ? f : { ...f, projectId: fromUrl, sprintId: "", moduleId: "" },
     );
   }, [searchParams]);
 
@@ -79,9 +79,9 @@ export function BugsPage() {
     queryFn: () => fetchProjects(),
   });
   const projectId = filters.projectId || undefined;
-  const cyclesQuery = useQuery({
-    queryKey: queryKeys.cycles(projectId || "_"),
-    queryFn: () => fetchCycles(projectId!),
+  const sprintsQuery = useQuery({
+    queryKey: queryKeys.sprints(projectId || "_"),
+    queryFn: () => fetchSprints(projectId!),
     enabled: !!projectId,
   });
   const modulesQuery = useQuery({
@@ -117,10 +117,10 @@ export function BugsPage() {
     return (id: string) => map.get(id) ?? id.slice(0, 8);
   }, [usersQuery.data]);
 
-  const cycleName = useMemo(() => {
-    const map = new Map(cyclesQuery.data?.map((c) => [c.id, c.name]));
+  const sprintName = useMemo(() => {
+    const map = new Map(sprintsQuery.data?.map((c) => [c.id, c.name]));
     return (id: string) => map.get(id) ?? id.slice(0, 8);
-  }, [cyclesQuery.data]);
+  }, [sprintsQuery.data]);
 
   async function onExport() {
     setBusy(true);
@@ -210,7 +210,7 @@ export function BugsPage() {
 
         <div
           className={`mb-6 grid shrink-0 gap-3 md:grid-cols-3 ${
-            showCycleFilter ? "lg:grid-cols-7" : "lg:grid-cols-6"
+            showSprintFilter ? "lg:grid-cols-7" : "lg:grid-cols-6"
           }`}
         >          <label className="tb-label">
             Project
@@ -221,7 +221,7 @@ export function BugsPage() {
                 setFilters((f) => ({
                   ...f,
                   projectId: e.target.value,
-                  cycleId: "",
+                  sprintId: "",
                   moduleId: "",
                 }))
               }
@@ -267,17 +267,17 @@ export function BugsPage() {
               ))}
             </select>
           </label>
-          {showCycleFilter ? (
+          {showSprintFilter ? (
             <label className="tb-label">
-              Cycle
+              Sprint
               <select
                 className="tb-select disabled:cursor-not-allowed disabled:opacity-60"
-                value={filters.cycleId ?? ""}
+                value={filters.sprintId ?? ""}
                 disabled={!filters.projectId}
-                onChange={(e) => setFilters((f) => ({ ...f, cycleId: e.target.value }))}
+                onChange={(e) => setFilters((f) => ({ ...f, sprintId: e.target.value }))}
               >
                 <option value="">{filters.projectId ? "All" : "Select a project first"}</option>
-                {cyclesQuery.data?.map((c) => (
+                {sprintsQuery.data?.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
@@ -330,7 +330,7 @@ export function BugsPage() {
                     priority: "",
                     severity: "",
                     assigneeId: "",
-                    cycleId: "",
+                    sprintId: "",
                     status: "",
                     moduleId: "",
                   })
@@ -355,14 +355,14 @@ export function BugsPage() {
               <span>Status</span>
               <span>Priority</span>
               <span>Activity</span>
-              <span className="text-right">Cycle / Project</span>
+              <span className="text-right">Sprint / Project</span>
             </div>
             {bugs.map((bug) => (
               <BugListRow
                 key={bug.id}
                 bug={bug}
                 assigneeName={userName(bug.assigneeId)}
-                cycleName={projectId ? cycleName(bug.cycleId) : undefined}
+                sprintName={projectId ? sprintName(bug.sprintId) : undefined}
                 projectName={!projectId ? projectNameById(bug.projectId) : undefined}
                 actions={
                   <>

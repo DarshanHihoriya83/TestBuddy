@@ -61,7 +61,7 @@ async function main() {
   const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
   // 3) Catalog
-  let projectId, cycleId, assigneeId;
+  let projectId, sprintId, assigneeId;
   try {
     const [users, projects] = await Promise.all([
       fetch(`${API}/api/users`, { headers: auth }).then((r) => r.json()),
@@ -69,13 +69,13 @@ async function main() {
     ]);
     projectId = projects[0]?.id;
     assigneeId = users.find((u) => u.role === "TESTER")?.id || users[0]?.id;
-    const cycles = await fetch(
-      `${API}/api/cycles?projectId=${projectId}`,
+    const sprints = await fetch(
+      `${API}/api/sprints?projectId=${projectId}`,
       { headers: auth },
     ).then((r) => r.json());
-    cycleId = cycles.find((c) => c.isDefault)?.id || cycles[0]?.id;
-    if (!projectId || !cycleId || !assigneeId) throw new Error("missing catalog ids");
-    pass("catalog", `project=${projects[0].name}, cycle=${cycles.find(c=>c.id===cycleId)?.name}`);
+    sprintId = sprints.find((c) => c.isDefault)?.id || sprints[0]?.id;
+    if (!projectId || !sprintId || !assigneeId) throw new Error("missing catalog ids");
+    pass("catalog", `project=${projects[0].name}, sprint=${sprints.find(c=>c.id===sprintId)?.name}`);
   } catch (e) {
     fail("catalog", e.message);
     process.exit(1);
@@ -90,7 +90,7 @@ async function main() {
       priority: "HIGH",
       severity: "MAJOR",
       assigneeId,
-      cycleId,
+      sprintId,
       projectId,
       status: "NEW",
       steps: [

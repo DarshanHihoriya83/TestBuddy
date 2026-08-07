@@ -11,9 +11,11 @@ export interface BugDraftMeta {
   priority: BugPriority;
   severity: BugSeverity;
   assigneeId: string;
-  cycleId: string;
+  sprintId: string;
   projectId: string;
   moduleId?: string;
+  environmentId?: string;
+  environmentSnapshot?: string;
   /** Display name for on-page toolbar */
   moduleName?: string;
 }

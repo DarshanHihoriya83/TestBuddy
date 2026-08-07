@@ -2,7 +2,8 @@ import type {
   Bug,
   BugComment,
   BugFilters,
-  Cycle,
+  Sprint,
+  Environment,
   Module,
   Organization,
   Project,
@@ -182,10 +183,11 @@ export const fetchProjects = (organizationId?: string) =>
 export const fetchProjectQuota = () => api<ProjectCreationQuota>("/api/projects/quota");
 
 export interface ProjectDetail extends Project {
-  cycleCount: number;
+  sprintCount: number;
   bugCount: number;
   memberCount?: number;
   moduleCount?: number;
+  environmentCount?: number;
 }
 
 export const fetchProject = (id: string) => api<ProjectDetail>(`/api/projects/${id}`);
@@ -197,6 +199,9 @@ export type ProjectPayload = {
   jiraProjectKey?: string;
   adoOrgUrl?: string;
   adoProject?: string;
+  adoTeam?: string;
+  adoPat?: string;
+  clearAdoPat?: boolean;
 };
 
 export const createProject = (body: ProjectPayload) =>
@@ -296,9 +301,11 @@ export function updateBug(
     priority: string;
     severity: string;
     assigneeId: string;
-    cycleId: string;
+    sprintId: string;
     projectId: string;
     moduleId?: string | null;
+    environmentId?: string | null;
+    environmentSnapshot?: string | null;
     status: string;
     steps?: Step[];
   },
@@ -311,14 +318,128 @@ export function updateBug(
 
 export const deleteBug = (id: string) => api<void>(`/api/bugs/${id}`, { method: "DELETE" });
 
-export const fetchCycles = (projectId: string) =>
-  api<Cycle[]>(`/api/cycles?projectId=${encodeURIComponent(projectId)}`);
+export const fetchCycles = (projectId: string) => fetchSprints(projectId);
+
+export const fetchSprints = (projectId: string) =>
+  api<Sprint[]>(`/api/sprints?projectId=${encodeURIComponent(projectId)}`);
+
+export function createSprint(
+  projectId: string,
+  body: { name: string; isDefault?: boolean; startDate?: string; endDate?: string },
+) {
+  return api<Sprint>(`/api/projects/${encodeURIComponent(projectId)}/sprints`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateSprint(
+  id: string,
+  body: {
+    name?: string;
+    isDefault?: boolean;
+    active?: boolean;
+    startDate?: string | null;
+    endDate?: string | null;
+  },
+) {
+  return api<Sprint>(`/api/sprints/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export const deleteSprint = (id: string) =>
+  api<void>(`/api/sprints/${id}`, { method: "DELETE" });
+
+export function testProjectAdo(projectId: string) {
+  return api<{ ok: boolean; iterationCount: number; team: string | null }>(
+    `/api/projects/${encodeURIComponent(projectId)}/ado/test`,
+    { method: "POST", body: "{}" },
+  );
+}
+
+export function fetchAdoIterations(projectId: string) {
+  return api<
+    Array<{
+      id: string;
+      name: string;
+      path: string;
+      startDate?: string | null;
+      finishDate?: string | null;
+      timeFrame?: string | null;
+      team?: string;
+    }>
+  >(`/api/projects/${encodeURIComponent(projectId)}/ado/iterations`);
+}
+
+export function importAdoSprints(projectId: string, body?: { iterationIds?: string[] }) {
+  return api<{ imported: number; sprints: Sprint[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/sprints/import-ado`,
+    { method: "POST", body: JSON.stringify(body || {}) },
+  );
+}
+
+export const fetchEnvironments = (projectId: string) =>
+  api<Environment[]>(`/api/projects/${encodeURIComponent(projectId)}/environments`);
+
+export function createEnvironment(
+  projectId: string,
+  body: { name: string; isDefault?: boolean },
+) {
+  return api<Environment>(`/api/projects/${encodeURIComponent(projectId)}/environments`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateEnvironment(
+  id: string,
+  body: {
+    name?: string;
+    isDefault?: boolean;
+    active?: boolean;
+    sortOrder?: number;
+  },
+) {
+  return api<Environment>(`/api/environments/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export const deleteEnvironment = (id: string) =>
+  api<void>(`/api/environments/${id}`, { method: "DELETE" });
 
 export function fetchBugs(filters: BugFilters = {}) {
   return api<Bug[]>(`/api/bugs${buildBugQuery(filters)}`);
 }
 
-export const fetchBug = (id: string) => api<Bug>(`/api/bugs/${id}`);
+export const fetchBug = (id: string, opts?: { syncAdo?: boolean }) =>
+  api<Bug>(
+    `/api/bugs/${id}${opts?.syncAdo ? "?syncAdo=1" : ""}`,
+  );
+
+export function pushBugToAdo(id: string) {
+  return api<{
+    created: boolean;
+    adoWorkItemId: string;
+    adoWorkItemUrl: string | null;
+    screenshotsAttached: number;
+    commentsPushed: number;
+    bug: Bug;
+  }>(`/api/bugs/${id}/push/ado`, { method: "POST", body: "{}" });
+}
+
+export function syncBugFromAdo(id: string) {
+  return api<{
+    adoWorkItemId: string;
+    adoWorkItemUrl: string | null;
+    adoState: string | null;
+    commentsImported: number;
+    bug: Bug;
+  }>(`/api/bugs/${id}/sync/ado`, { method: "POST", body: "{}" });
+}
 
 export interface BugExportFile {
   exportedAt: string;
@@ -337,9 +458,10 @@ export function buildBugQuery(filters: BugFilters = {}) {
   if (filters.priority) params.set("priority", filters.priority);
   if (filters.severity) params.set("severity", filters.severity);
   if (filters.assigneeId) params.set("assigneeId", filters.assigneeId);
-  if (filters.cycleId) params.set("cycleId", filters.cycleId);
+  if (filters.sprintId) params.set("sprintId", filters.sprintId);
   if (filters.status) params.set("status", filters.status);
   if (filters.moduleId) params.set("moduleId", filters.moduleId);
+  if (filters.environmentId) params.set("environmentId", filters.environmentId);
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }
@@ -389,7 +511,7 @@ export function createTestCase(body: {
   executionStatus?: string;
   projectId: string;
   moduleId?: string | null;
-  cycleId: string;
+  sprintId: string;
   assigneeId?: string | null;
   linkedBugId?: string | null;
   generatedByAi?: boolean;
@@ -412,7 +534,7 @@ export function updateTestCase(
     status: string;
     executionStatus: string;
     moduleId: string | null;
-    cycleId: string;
+    sprintId: string;
     assigneeId: string | null;
     linkedBugId: string | null;
   }>,
